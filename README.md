@@ -183,3 +183,61 @@ If you use this code base in your research, please cite our paper with the follo
 
 ## License
 This code is released under the MIT license (see [LICENSE](LICENSE)).
+
+
+• - Added automatic persistence of retrieval metrics each epoch
+    when retrieval is enabled (run.py:680-705), so evaluations emit
+    retrieval_metrics_epoch_*.json alongside the checkpoints.
+  - Introduced tools/retrieval_report.py:1-139, a compact CLI that
+    inspects the FAISS store and any logged metrics to give you a quick
+    health check after retrieval runs.
+  - Documented the new report utility and usage workflow in the retrieval
+    section of the README (README.md:86-100).
+
+  0. Prepare GSM8K
+      - Run bash preprocessing/gsm_icot.bash to download and convert
+        the dataset into JSON (preprocessing/gsm_icot.bash:6-18,
+        preprocessing/gsm_icot.py:6-31). The files land at data/
+        gsm_train.json, data/gsm_valid.json, and data/gsm_test.json.
+  1. Train Coconut without Retrieval (paper reproduction)
+      - Edit args/gsm_coconut.yaml to set your save_path,
+        load_model_path, and data locations (args/gsm_coconut.yaml:3-
+        34). Retrieval stays off because retrieval.enabled: false in that
+        config (args/gsm_coconut.yaml:36-60).
+      - Launch training, e.g. torchrun --nnodes 1 --nproc_per_node
+        4 run.py args/gsm_coconut.yaml. Checkpoints are stored under
+        <save_path>/<name> (see run.py:314-357).
+  2. Build the FAISS Index with Retrieval Enabled
+      - Switch to the evaluation config args/gsm_coconut_eval.yaml,
+        point load_model_path at your best checkpoint, and confirm
+        the index output path (args/gsm_coconut_eval.yaml:3-34, args/
+        gsm_coconut_eval.yaml:36-60).
+      - Key knobs to tune before launching evaluation (run.py:520-735):
+          - Retrieval behaviour: retrieval.k, retrieval.sim_threshold,
+            retrieval.key_dim, retrieval.value_dim, retrieval.metric,
+            retrieval.normalize_keys.
+          - Nudge dynamics: nudge.alpha_max, nudge.clip_radius,
+            nudge.calibration, nudge.exit_threshold, nudge.exit_metric,
+            nudge.match_norm.
+          - Training-side adaptation: training.nudge_contrastive,
+            training.nudge_contrastive_weight,
+            training.retrieval_buffer_limit, training.nudge_buffer_batch.
+          - Index persistence: index.path (default data/index/
+            faiss_index.bin).
+      - Run torchrun ... args/gsm_coconut_eval.yaml. The run now saves
+        retrieval_metrics_epoch_*.json in your save_path/name directory
+        and updates the FAISS index file each epoch (run.py:680-705,
+        run.py:729-735).
+  3. Quick Performance Snapshot
+      - After any retrieval-enabled evaluation, summarise the index and
+        logged metrics with the new utility:
+
+        python tools/retrieval_report.py \
+          --index-path data/index/faiss_index.bin \
+          --metrics-dir /path/to/save_dir
+          - The script reports entry counts, norms, anchor similarities,
+            and a per-epoch overview of ECE, Brier, false exits, mean
+            forward passes, and index size (tools/retrieval_report.py:1-
+            139).
+          - If --metrics-dir is omitted it searches near the index or in
+            the current directory for retrieval_metrics_epoch_*.json.
