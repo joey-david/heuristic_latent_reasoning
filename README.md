@@ -20,6 +20,52 @@ pip install -r requirements.txt
 
 The code relies on [wandb](https://wandb.ai/site/) for logging. Please log in your wandb account following this [document](https://docs.wandb.ai/ref/cli/wandb-login/) before running any experiments.
 
+## Docker Setup (Optional)
+
+If you prefer a containerized environment (or do not have `sudo` access on the GPU node), use the provided `Dockerfile` and `compose.yaml`.
+
+Build the image (no `sudo` required when using rootless Docker):
+
+```bash
+docker build -t coconut:latest .
+```
+
+Launch an interactive container with GPU access:
+
+```bash
+docker run --rm -it \
+  --gpus all \
+  --ipc=host \
+  -v "$(pwd)":/workspace \
+  -v coconut_hf_cache:/workspace/.cache/huggingface \
+  -v coconut_wandb:/workspace/.cache/wandb \
+  -e WANDB_API_KEY=<your_wandb_key> \
+  coconut:latest
+```
+
+Inside the container you can run the usual commands, e.g.:
+
+```bash
+torchrun --nnodes 1 --nproc_per_node N_GPUS run.py PATH_TO_ARGS
+```
+
+If you want files created in the container to keep your local UID/GID, pass them during the build:
+
+```bash
+docker build \
+  --build-arg USER_UID=$(id -u) \
+  --build-arg USER_GID=$(id -g) \
+  -t coconut:latest .
+```
+
+You can also use Docker Compose to manage the container and caches:
+
+```bash
+UID=$(id -u) GID=$(id -g) docker compose run --rm coconut
+```
+
+Compose mounts the repository into `/workspace` and preserves Hugging Face and wandb caches between runs via named volumes. Set `WANDB_MODE=offline` if you prefer to skip wandb logging inside the container.
+
 ## Data
 
 The data for training and evaluation should be presented as a json file like below:
@@ -95,7 +141,7 @@ torchrun --nnodes 1 --nproc_per_node N_GPUS run.py PATH_TO_ARGS
 
 Here we provide instructions to reproduce our experiments in the paper.
 
-All the commands below assume 4 * A100 (80GB) GPUs. You may change the corresponding arguments in the config file (`batch_size_training`, `gradient_accumulation_steps`) and `nproc_per_node` when launching the run, to adapt your resources.
+All the commands below assume 1 * A100 (80GB) GPUs. You may change the corresponding arguments in the config file (`batch_size_training`, `gradient_accumulation_steps`) and `nproc_per_node` when launching the run, to adapt your resources.
 
 
 ### GSM8K
@@ -109,19 +155,19 @@ bash preprocessing/gsm_icot.bash
 First train the model with CoT (as the stage 0 training)
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_cot.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_cot.yaml
 ```
 
 Select a checkpoint as the initialization of Coconut (the validation accuracy is expected to be around 40%). Replace the `load_model_path` in the [args/gsm_coconut.yaml](args/gsm_coconut.yaml) with your selected checkpoint, and run:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut.yaml
 ```
 
 Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/gsm_coconut_eval.yaml](args/gsm_coconut_eval.yaml). To evaluate:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut_eval.yaml
 ```
 
 ### ProntoQA
@@ -142,13 +188,13 @@ python preprocessing/prontoqa.py
 
 Then run the following to train the model:
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prontoqa_coconut.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/prontoqa_coconut.yaml
 ```
 
 Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut_eval.yaml
 ```
 
 
@@ -158,13 +204,13 @@ The ProsQA dataset is at [data/prosqa_*.json](data).
 
 Then run the following to train the model:
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut.yaml
 ```
 
 Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
 
 ```bash
-torchrun --nnodes 1 --nproc_per_node 4 run.py args/prosqa_coconut_eval.yaml
+torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut_eval.yaml
 ```
 
 

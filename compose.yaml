@@ -1,0 +1,28 @@
+services:
+  coconut:
+    build:
+      context: .
+      args:
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    image: coconut:latest
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:rw
+      - hf-cache:/workspace/.cache/huggingface
+      - wandb-cache:/workspace/.cache/wandb
+    environment:
+      - WANDB_DIR=/workspace/.cache/wandb
+      - HF_HOME=/workspace/.cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ipc: host
+    shm_size: 16g
+    gpus: all
+    stdin_open: true
+    tty: true
+
+volumes:
+  hf-cache:
+  wandb-cache:
