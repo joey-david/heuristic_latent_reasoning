@@ -253,6 +253,9 @@ This code is released under the MIT license (see [LICENSE](LICENSE)).
       - Launch training, e.g. torchrun --nnodes 1 --nproc_per_node
         4 run.py args/gsm_coconut.yaml. Checkpoints are stored under
         <save_path>/<name> (see run.py:314-357).
+
+        Possible checkpoints ([here](https://huggingface.co/Esther22/coconut_Reproduction/discussions))
+
   2. Build the FAISS Index with Retrieval Enabled
       - Switch to the evaluation config args/gsm_coconut_eval.yaml,
         point load_model_path at your best checkpoint, and confirm
