@@ -1,0 +1,10 @@
+dataset: data/gsm_test.json
+engine_module: heuristic.engine
+model_checkpoint: null
+run_id: gsm8k-heuristic-eval
+max_examples: null
+max_new_tokens: 128
+temperature: 0.7
+do_sample: false
+num_latent_thoughts: 8
+dry_run: true

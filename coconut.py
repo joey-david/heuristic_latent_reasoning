@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from collections import namedtuple
+from transformers.cache_utils import DynamicCache
 from transformers.models.gpt2 import GPT2LMHeadModel
 
 Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits"])
@@ -80,13 +81,21 @@ class Coconut(nn.Module):
 
             else:
                 # extract kv cache to reuse
+                if hasattr(kv_cache, "to_legacy_cache"):
+                    legacy_cache = kv_cache.to_legacy_cache()
+                else:
+                    legacy_cache = tuple(kv_cache)
+
                 past_key_values = [
                     (
                         k[:, :, : next_compute_range[0], :],
                         v[:, :, : next_compute_range[0], :],
                     )
-                    for k, v in kv_cache
+                    for k, v in legacy_cache
                 ]
+                past_key_values = DynamicCache.from_legacy_cache(
+                    tuple(past_key_values)
+                )
 
                 outputs = self.base_causallm(
                     inputs_embeds=inputs_embeds[
@@ -158,23 +167,29 @@ class Coconut(nn.Module):
             )
 
         # final pass
+        if kv_cache:
+            if hasattr(kv_cache, "to_legacy_cache"):
+                legacy_cache = kv_cache.to_legacy_cache()
+            else:
+                legacy_cache = tuple(kv_cache)
+            trimmed_cache = [
+                (
+                    k[:, :, : next_compute_range[0], :],
+                    v[:, :, : next_compute_range[0], :],
+                )
+                for k, v in legacy_cache
+            ]
+            final_cache = DynamicCache.from_legacy_cache(tuple(trimmed_cache))
+        else:
+            final_cache = None
+
         outputs = self.base_causallm(
             inputs_embeds=inputs_embeds[
                 :, next_compute_range[0] : next_compute_range[1], :
             ],
             attention_mask=attention_mask[:, : next_compute_range[1]],
             position_ids=position_ids[:, next_compute_range[0] : next_compute_range[1]],
-            past_key_values=(
-                [
-                    (
-                        k[:, :, : next_compute_range[0], :],
-                        v[:, :, : next_compute_range[0], :],
-                    )
-                    for k, v in kv_cache
-                ]
-                if kv_cache
-                else None
-            ),
+            past_key_values=final_cache,
             output_hidden_states=True,
         )
 

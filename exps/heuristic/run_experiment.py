@@ -1,11 +1,34 @@
-import argparse
 import importlib
 import json
+import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
+import yaml
 
 from exps.logger import ExperimentLogger
+from heuristic import HeuristicMemory
+
+
+DEFAULT_CONFIG = Path(__file__).with_name("config.yaml")
+
+
+def load_config(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def resolve_path(candidate: Any) -> Path:
+    if candidate in (None, "None"):
+        raise ValueError("A dataset path must be provided in the config file.")
+    return Path(candidate)
 
 
 def load_dataset(path: Path) -> List[Dict[str, Any]]:
@@ -21,8 +44,12 @@ def load_dataset(path: Path) -> List[Dict[str, Any]]:
     raise ValueError(f"Unsupported dataset format: {path}")
 
 
-def ensure_engine(args: argparse.Namespace) -> Tuple[Any, Any]:
-    module_name = args.engine_module or "heuristic.engine"
+def ensure_engine(
+    module_name: str,
+    model_checkpoint: Any,
+    num_latent_thoughts: int,
+    heuristic_memory: Optional[HeuristicMemory] = None,
+) -> Tuple[Any, Any]:
     module = importlib.import_module(module_name)
 
     if not hasattr(module, "load_engine") or not hasattr(module, "infer"):
@@ -30,10 +57,19 @@ def ensure_engine(args: argparse.Namespace) -> Tuple[Any, Any]:
             f"Module {module_name!r} must define load_engine() and infer()."
         )
 
-    engine = module.load_engine(
-        model_checkpoint=args.model_checkpoint,
-        num_latent_thoughts=args.num_latent_thoughts,
-    )
+    load_kwargs = {
+        "model_checkpoint": model_checkpoint,
+        "num_latent_thoughts": num_latent_thoughts,
+    }
+    if heuristic_memory is not None:
+        load_kwargs["heuristic_memory"] = heuristic_memory
+
+    try:
+        engine = module.load_engine(**load_kwargs)
+    except TypeError:
+        # Backwards compatibility for engines that do not yet accept heuristic memory.
+        load_kwargs.pop("heuristic_memory", None)
+        engine = module.load_engine(**load_kwargs)
     return module, engine
 
 
@@ -65,32 +101,41 @@ def compare_answers(predicted: Any, ground_truth: Any) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run the heuristic GPT-2 nudging model and log metrics."
-    )
-    parser.add_argument("--dataset", required=True, type=Path)
-    parser.add_argument("--model-checkpoint", type=str)
-    parser.add_argument("--run-id", type=str)
-    parser.add_argument("--max-examples", type=int)
-    parser.add_argument("--max-new-tokens", type=int, default=128)
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--do-sample", action="store_true")
-    parser.add_argument("--num-latent-thoughts", type=int, default=1)
-    parser.add_argument("--engine-module", type=str)
-    parser.add_argument("--dry-run", action="store_true")
-    args = parser.parse_args()
+    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_CONFIG
+    config = load_config(config_path)
 
-    dataset = load_dataset(args.dataset)
-    if args.max_examples:
-        dataset = dataset[: args.max_examples]
+    dataset_path = resolve_path(config.get("dataset"))
+    dataset = load_dataset(dataset_path)
+    max_examples = config.get("max_examples")
+    if max_examples not in (None, "None"):
+        dataset = dataset[: int(max_examples)]
 
+    run_id = config.get("run_id")
     log_path = Path(__file__).resolve().parent / "results.jsonl"
-    logger = ExperimentLogger(log_path, model_name="heuristic", run_id=args.run_id)
+    logger = ExperimentLogger(log_path, model_name="heuristic", run_id=run_id)
+
+    num_latent_thoughts = int(config.get("num_latent_thoughts", 1))
+    max_new_tokens = int(config.get("max_new_tokens", 128))
+    temperature = float(config.get("temperature", 0.7))
+    do_sample = bool(config.get("do_sample", False))
+    dry_run = bool(config.get("dry_run", False))
+    engine_module_name = config.get("engine_module", "heuristic.engine")
+    model_checkpoint = config.get("model_checkpoint")
+
+    heuristic_memory_cfg = config.get("heuristic_memory") if not dry_run else None
+    heuristic_memory = (
+        HeuristicMemory(heuristic_memory_cfg) if heuristic_memory_cfg else None
+    )
 
     engine_module = None
     engine = None
-    if not args.dry_run:
-        engine_module, engine = ensure_engine(args)
+    if not dry_run:
+        engine_module, engine = ensure_engine(
+            engine_module_name,
+            model_checkpoint,
+            num_latent_thoughts,
+            heuristic_memory=heuristic_memory,
+        )
 
     for idx, problem in enumerate(dataset):
         question = (
@@ -103,18 +148,25 @@ def main() -> None:
         problem_id = problem.get("problem_id") or problem.get("id") or str(idx)
 
         start = time.perf_counter()
-        if args.dry_run:
-            result = simulate_answer(args.num_latent_thoughts, problem)
+        if dry_run:
+            result = simulate_answer(num_latent_thoughts, problem)
         else:
-            result = engine_module.infer(
-                engine=engine,
-                question=question,
-                ground_truth=ground_truth,
-                num_latent_thoughts=args.num_latent_thoughts,
-                max_new_tokens=args.max_new_tokens,
-                temperature=args.temperature,
-                do_sample=args.do_sample,
-            )
+            infer_kwargs = {
+                "engine": engine,
+                "question": question,
+                "ground_truth": ground_truth,
+                "num_latent_thoughts": num_latent_thoughts,
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "do_sample": do_sample,
+            }
+            if heuristic_memory is not None:
+                infer_kwargs["heuristic_memory"] = heuristic_memory
+            try:
+                result = engine_module.infer(**infer_kwargs)
+            except TypeError:
+                infer_kwargs.pop("heuristic_memory", None)
+                result = engine_module.infer(**infer_kwargs)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         heuristic_payload = {

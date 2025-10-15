@@ -1,0 +1,9 @@
+dataset: data/gsm_test.json
+model_checkpoint: data/checkpoints/gsm/gsm-cot
+model_id: openai-community/gpt2
+run_id: gsm8k-cot-eval
+max_examples: null
+max_new_tokens: 160
+do_sample: false
+temperature: 0.0
+dry_run: false

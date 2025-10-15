@@ -1,0 +1,28 @@
+# args/gsm_heuristic.yaml
+# Inherit from the base coconut config
+defaults:
+  - gsm_coconut
+
+# Heuristic Memory Configuration
+heuristic_memory:
+  # Paths
+  faiss_index_path: "data/index/gsm_faiss_index.bin"
+  metadata_path: "data/index/gsm_index_metadata.pkl"
+
+  # Dimensionality
+  # Dimension of the key stored in FAISS (after projection)
+  key_dim: 128
+  # Dimension of the value stored alongside the key (after projection)
+  value_dim: 128
+
+  # Retrieval Control
+  # Cosine similarity threshold for applying a nudge. If below, no nudge is used.
+  retrieval_threshold: 0.9
+  # Number of neighbors to retrieve
+  k_neighbors: 1
+
+  # NudgingNet Architecture
+  # Hidden dimension of the MLP inside the NudgingNet
+  nudge_net_hidden_dim: 256
+  # The final output dimension must match the LLM's latent dimension (e.g., 768 for gpt2-small)
+  llm_latent_dim: 768
