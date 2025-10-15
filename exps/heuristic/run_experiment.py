@@ -159,6 +159,10 @@ def main() -> None:
 
     train_mode = bool(config.get("train_mode", True))
     live_plot = bool(config.get("live_plot", True))
+    live_plot_path = config.get("live_plot_path")
+    if live_plot_path in (None, "None"):
+        live_plot_path = None
+    live_plot_interactive = bool(config.get("live_plot_interactive", True))
     baseline_accuracy = float(config.get("baseline_accuracy", 0.341))
 
     model_checkpoint = config.get("model_checkpoint")
@@ -191,7 +195,16 @@ def main() -> None:
         "retrieval_successes": 0,
     }
 
-    plotter = LivePlot("Heuristic Accuracy", baseline=baseline_accuracy) if live_plot else None
+    plotter = (
+        LivePlot(
+            "Heuristic Accuracy",
+            baseline=baseline_accuracy,
+            save_path=live_plot_path,
+            interactive=live_plot_interactive,
+        )
+        if live_plot
+        else None
+    )
 
     for idx, problem in enumerate(dataset):
         question = (
