@@ -96,8 +96,8 @@ class NudgingNet(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(mlp_input_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.GELU(), # Let's start with a single hidden layer
             nn.Linear(hidden_dim, output_dim),
         )
 
@@ -200,9 +200,7 @@ class HeuristicMemory:
         self.load_index()
         self.load_nudge_net()
 
-    # --------------------------------------------------------------------- #
-    # Offline utilities                                                     #
-    # --------------------------------------------------------------------- #
+    # Offline utilities
 
     def build_index(self, reasoning_traces: Iterable[Dict[str, Tensor]]) -> None:
         """
@@ -275,9 +273,7 @@ class HeuristicMemory:
             }
         )
 
-    # --------------------------------------------------------------------- #
-    # Online retrieval                                                      #
-    # --------------------------------------------------------------------- #
+    # Online retrieval
 
     def search(self, observed_k0: Tensor) -> Optional[RetrievedHeuristic]:
         """
@@ -410,9 +406,7 @@ class HeuristicMemory:
             )
         return prob, loss
 
-    # --------------------------------------------------------------------- #
-    # Persistence                                                           #
-    # --------------------------------------------------------------------- #
+    # Persistence
 
     def save_index(self) -> None:
         """Saves the FAISS index and metadata to disk."""
@@ -434,9 +428,7 @@ class HeuristicMemory:
         with self.metadata_path.open("rb") as f:
             self.metadata = pickle.load(f)
 
-    # --------------------------------------------------------------------- #
-    # Nudge network persistence                                             #
-    # --------------------------------------------------------------------- #
+    # Nudge network persistence
 
     def save_nudge_net(self) -> None:
         self.nudging_net.eval()
@@ -459,8 +451,8 @@ class HeuristicMemory:
                 self.nudging_net.load_state_dict(state)
             if "classifier" in state:
                 self.nudge_classifier.load_state_dict(state["classifier"])
-    # Internal helpers                                                      #
-    # --------------------------------------------------------------------- #
+
+    # Internal helpers
 
     def _init_index(self, key_dim: int) -> None:
         """Initialises an empty FAISS index with the given dimensionality."""

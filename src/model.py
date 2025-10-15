@@ -1,8 +1,5 @@
 '''The main augmented LLM model class, augmenting a base LRLLM with heuristic storage and retrieval logic.'''
 
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
