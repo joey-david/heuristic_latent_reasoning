@@ -4,6 +4,10 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from collections import namedtuple
+from utils import ensure_transformers_no_torchvision
+
+ensure_transformers_no_torchvision()
+
 from transformers.models.gpt2 import GPT2LMHeadModel
 
 Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits"])

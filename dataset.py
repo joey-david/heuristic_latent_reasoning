@@ -10,6 +10,10 @@ from typing import Optional
 import torch
 import torch.distributed as dist
 from datasets import Dataset
+from utils import ensure_transformers_no_torchvision
+
+ensure_transformers_no_torchvision()
+
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import pad_without_fast_tokenizer_warning
 
