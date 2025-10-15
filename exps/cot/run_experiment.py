@@ -4,13 +4,18 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-import torch
-import yaml
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
+
+import torch
+import yaml
+
+from utils import ensure_transformers_no_torchvision
+
+ensure_transformers_no_torchvision()
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from exps.logger import ExperimentLogger
 

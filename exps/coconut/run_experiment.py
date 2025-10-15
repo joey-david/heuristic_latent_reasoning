@@ -1,5 +1,4 @@
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -12,7 +11,9 @@ if str(ROOT) not in sys.path:
 import torch
 import yaml
 
-os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+from utils import ensure_transformers_no_torchvision
+
+ensure_transformers_no_torchvision()
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 

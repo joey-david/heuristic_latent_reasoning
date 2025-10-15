@@ -4,6 +4,10 @@
 import torch
 import torch.distributed
 import torch.optim as optim
+from utils import Config, ensure_transformers_no_torchvision, set_seed
+
+ensure_transformers_no_torchvision()
+
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import wandb
@@ -33,7 +37,6 @@ import json
 import gc
 import argparse
 import functools
-from utils import Config, set_seed
 
 
 def main():
