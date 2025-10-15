@@ -1,10 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 
+import os
+from collections import namedtuple
+
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
-from collections import namedtuple
+
+os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+
 from transformers.cache_utils import DynamicCache
 from transformers.models.gpt2 import GPT2LMHeadModel
 
