@@ -1,8 +1,8 @@
 # Coconut
 
-The code base is the official implementation of [Training Large Language Models to Reason in a Continuous Latent Space](https://arxiv.org/abs/2412.06769).
+This code base is the official implementation of [No Blank Slate: Heuristic Reasoning in Latent Space](https://arxiv.org/abs/2412.06769).<br> It builds on the official implementation of [Training Large Language Models to Reason in a Continuous Latent Space](https://arxiv.org/abs/2412.06769) by Meta FAIR.
 
-![coconut](assets/coconut.png)
+![no blank slate](assets/coconut.png)
 
 ## Getting Started
 Clone repo:

@@ -1,8 +1,8 @@
 # need 4 gpus
 
 project: coconut
-save_path: YOUR_PATH_TO_SAVE_THE_MODEL
-name: gsm-coconut-eval
+save_path: data/checkpoints/gsm
+name: gsm-coconut-eval-run
 
 only_eval: True
 
@@ -19,7 +19,7 @@ pad_latent_to_max: True
 save_only_improve: False
 uniform_prob: 0.0
 model_id: openai-community/gpt2
-load_model_path: YOUR_PATH_TO_COCONUT_CHECKPOINT
+load_model_path: data/checkpoints/gsm/gsm-coconut
 seed: 0
 resume: 15
 bf16: False

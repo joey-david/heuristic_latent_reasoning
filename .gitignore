@@ -1,5 +1,6 @@
 .venv/
 .env
 __pycache__/
-
+lit/
 data/gsm_*
+data/checkpoints/*
