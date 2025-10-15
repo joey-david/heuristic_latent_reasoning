@@ -22,12 +22,12 @@ The code relies on [wandb](https://wandb.ai/site/) for logging. Please log in yo
 
 ## Docker Setup (Optional)
 
-If you prefer a containerized environment (or do not have `sudo` access on the GPU node), use the provided `Dockerfile` and `compose.yaml`.
+If you prefer a containerized environment (or do not have `sudo` access on the GPU node), use the provided configuration in `docker/`.
 
 Build the image (no `sudo` required when using rootless Docker):
 
 ```bash
-docker build -t coconut:latest .
+docker build -f docker/Dockerfile -t coconut:latest .
 ```
 
 Launch an interactive container with GPU access:
@@ -53,6 +53,7 @@ If you want files created in the container to keep your local UID/GID, pass them
 
 ```bash
 docker build \
+  -f docker/Dockerfile \
   --build-arg USER_UID=$(id -u) \
   --build-arg USER_GID=$(id -g) \
   -t coconut:latest .
@@ -61,7 +62,7 @@ docker build \
 You can also use Docker Compose to manage the container and caches:
 
 ```bash
-UID=$(id -u) GID=$(id -g) docker compose run --rm coconut
+UID=$(id -u) GID=$(id -g) docker compose -f docker/compose.yaml run --rm coconut
 ```
 
 Compose mounts the repository into `/workspace` and preserves Hugging Face and wandb caches between runs via named volumes. Set `WANDB_MODE=offline` if you prefer to skip wandb logging inside the container.

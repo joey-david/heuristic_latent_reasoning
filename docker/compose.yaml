@@ -1,14 +1,15 @@
 services:
   coconut:
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
       args:
         USER_UID: ${UID:-1000}
         USER_GID: ${GID:-1000}
     image: coconut:latest
     working_dir: /workspace
     volumes:
-      - .:/workspace:rw
+      - ..:/workspace:rw
       - hf-cache:/workspace/.cache/huggingface
       - wandb-cache:/workspace/.cache/wandb
     environment:
