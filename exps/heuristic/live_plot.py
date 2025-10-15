@@ -1,9 +1,24 @@
+from pathlib import Path
+from typing import Optional, Union
+
 import matplotlib.pyplot as plt
 
 
 class LivePlot:
-    def __init__(self, title: str, baseline: float | None = None) -> None:
-        plt.ion()
+    def __init__(
+        self,
+        title: str,
+        baseline: float | None = None,
+        *,
+        save_path: Optional[Union[str, Path]] = None,
+        interactive: bool = True,
+    ) -> None:
+        self.interactive = interactive
+
+        if self.interactive:
+            plt.ion()
+        else:
+            plt.ioff()
         self.fig, (self.ax_perf, self.ax_memory) = plt.subplots(
             2, 1, sharex=True, figsize=(8, 8)
         )
@@ -51,6 +66,12 @@ class LivePlot:
             )
 
         self._refresh_legends()
+
+        if save_path is not None:
+            self.save_path: Optional[Path] = Path(save_path)
+            self.save_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            self.save_path = None
 
     def _refresh_legends(self) -> None:
         perf_handles = [self.acc_line, self.loss_line]
@@ -104,5 +125,10 @@ class LivePlot:
         self.ax_success.autoscale_view()
 
         self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
-        plt.pause(0.01)
+
+        if self.interactive:
+            self.fig.canvas.flush_events()
+            plt.pause(0.01)
+
+        if self.save_path is not None:
+            self.fig.savefig(self.save_path, bbox_inches="tight")
