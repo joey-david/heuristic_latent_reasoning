@@ -215,6 +215,7 @@ class Coconut(nn.Module):
         assert input_ids.shape[0] == 1, "only support batch_size == 1 now"
 
         tokens = input_ids[0].detach().tolist()
+        latent_nudge = kwargs.pop("latent_nudge", None)
 
         labels = input_ids.clone()  # placeholder. not used.
         outputs = self.forward(
@@ -226,6 +227,8 @@ class Coconut(nn.Module):
             ).reshape(1, -1),
         )
         inputs_embeds = outputs.inputs_embeds
+        if latent_nudge is not None:
+            inputs_embeds[:, -1, :] += latent_nudge.to(inputs_embeds.device)
 
         # get the first token using the current hidden state
         next_token = torch.argmax(outputs.logits[0, -1]).item()

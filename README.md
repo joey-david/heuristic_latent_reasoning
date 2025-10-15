@@ -1,224 +1,120 @@
-# Coconut
+# Heuristic Latent Reasoning
 
-This code base is the official implementation of [No Blank Slate: Heuristic Reasoning in Latent Space](https://arxiv.org/abs/2412.06769).<br> It builds on the official implementation of [Training Large Language Models to Reason in a Continuous Latent Space](https://arxiv.org/abs/2412.06769) by Meta FAIR.
+This repository explores **latent-space heuristics** for language-model reasoning.  
+We build directly on top of [Coconut](https://arxiv.org/abs/2412.06769) while adding:
 
-![no blank slate](assets/coconut.png)
+- a FAISS-backed heuristic memory that nudges the model with retrieved traces,
+- tooling to log retrieval dynamics and aggregate experiment metrics,
+- practical recipes for reproducing baselines and running the new heuristic variants.
 
-## Getting Started
-Clone repo:
-```
-git clone git@github.com:facebookresearch/coconut.git
-cd coconut
-```
+![Heuristic Latent Reasoning](assets/coconut.png)
 
-Setup environment:
-```
-conda create --name coconut python=3.12
-conda activate coconut
+## Environment Setup
+
+```bash
+git clone https://github.com/facebookresearch/heuristic_latent_reasoning.git
+cd heuristic_latent_reasoning
+
+conda create -n hlr python=3.12
+conda activate hlr
+
 pip install -r requirements.txt
+# pick the FAISS build that matches your hardware
+pip install faiss-gpu    # or: pip install faiss-cpu
 ```
 
-The code relies on [wandb](https://wandb.ai/site/) for logging. Please log in your wandb account following this [document](https://docs.wandb.ai/ref/cli/wandb-login/) before running any experiments.
-
-## Docker Setup (Optional)
-
-If you prefer a containerized environment (or do not have `sudo` access on the GPU node), use the provided configuration in `docker/`.
-
-Build the image (no `sudo` required when using rootless Docker):
+Login to [Weights & Biases](https://wandb.ai/site/) before launching experiments:
 
 ```bash
-docker build -f docker/Dockerfile -t coconut:latest .
+wandb login
 ```
 
-Launch an interactive container with GPU access:
+> **Tip:** the repository ships with a `docker/` configuration if you prefer containerized runs.  
+> The compose file mounts Hugging Face and wandb caches so you keep artifacts between sessions.
+
+## Data Layout
+
+- Datasets live under `data/` and use a simple JSON structure:
+
+  ```python
+  [
+    {"question": "...", "answer": "...", "steps": ["...", "..."]},
+    ...
+  ]
+  ```
+
+- To download and preprocess GSM8K with Internalized CoT augmentations:
+
+  ```bash
+  bash preprocessing/gsm_icot.bash
+  ```
+
+## Baseline: Coconut in a Nutshell
+
+The Coconut training loop is unchanged; we simply keep the knobs that matter:
 
 ```bash
-docker run --rm -it \
-  --gpus all \
-  --ipc=host \
-  -v "$(pwd)":/workspace \
-  -v coconut_hf_cache:/workspace/.cache/huggingface \
-  -v coconut_wandb:/workspace/.cache/wandb \
-  -e WANDB_API_KEY=<your_wandb_key> \
-  coconut:latest
-```
-
-Inside the container you can run the usual commands, e.g.:
-
-```bash
-torchrun --nnodes 1 --nproc_per_node N_GPUS run.py PATH_TO_ARGS
-```
-
-If you want files created in the container to keep your local UID/GID, pass them during the build:
-
-```bash
-docker build \
-  -f docker/Dockerfile \
-  --build-arg USER_UID=$(id -u) \
-  --build-arg USER_GID=$(id -g) \
-  -t coconut:latest .
-```
-
-You can also use Docker Compose to manage the container and caches:
-
-```bash
-UID=$(id -u) GID=$(id -g) docker compose -f docker/compose.yaml run --rm coconut
-```
-
-Compose mounts the repository into `/workspace` and preserves Hugging Face and wandb caches between runs via named volumes. Set `WANDB_MODE=offline` if you prefer to skip wandb logging inside the container.
-
-## Data
-
-The data for training and evaluation should be presented as a json file like below:
-
-```python
-[
-  {
-    "question": "...",
-    "answer": "...",
-    "steps": ["...", "...", ...]
-  },
-  ...
-]
-```
-
-The file should contain a list of data points. Each data point is composed of a question (str), an answer (str), and a list of steps (str), where each of them is a string.
-
-For example, you can download and process the [GSM8K](https://arxiv.org/abs/2110.14168) dataset (with [augmented training and validation sets](https://github.com/da03/Internalize_CoT_Step_by_Step/tree/e06a32ee5e4cd117171daeb4755d2a97ece62761/data/gsm8k)) by running:
-
-```bash
-bash preprocessing/gsm_icot.bash
-```
-
-## Arguments
-
-The configuration of a run should be specified in a yaml file (an example can be found [here](args/gsm_coconut.yaml)).
-
-- **General settings**
-
-  - **project**: Project name for wandb
-  - **save_path**: Your path to store the checkpoints
-  - **only_eval**: If true, only load a model and test on the data from `val_path` (must used along with `load_model_path`). Otherwise, train the model on `train_path` and test on `val_path` after every epoch.
-
-- **Method**
-  - **coconut**: Train coconut model
-  - **cot**: Train cot model
-  - **no_thoughts**: Train coconut (w/o thought) model
-  - **no_cot**: Train no-cot model
-
-- **Training settings**
-
-  - **c_thought**: Number of continuous thoughts for each reasoning step
-  - **epochs_per_stage**: Number of epochs for every training stage
-  - **max_latent_stage**: The maximum number of training stages (in addition to the initial stage)
-  - **pad_latent_to_max**: If the number of reasoning steps is fewer than the index of current training stage, pad the number of continuous thoughts.
-  - **save_only_improve**: Save the model only when there the best validation accuracy is updated. Recommended to set `False` for Coconut model training, because otherwise the checkpoints in the last stage might now get saved.
-  - **uniform_prob**: The probability to mix data from other stages. 0 for standard experiment, 0.3 for analysis experiment.
-  - **model_id**: Huggingface model id to load as the initialization, e.g., `openai-community/gpt2`
-  - **load_model_path**: The path to a checkpoint to load. Used in two cases: (1) for evaluation (2) to initialize coconut from a CoT-tuned model.
-  - **seed**: Random seed.
-  - **resume**: The epoch to resume. Can be used when we want to skip the initial training stages.
-  - **bf16**: Whether to use bf16 training.
-  - **train_path**: Path to the training set.
-  - **val_path**: Path to the validation or test set (depending on `only_eval`)
-  - **reset_optimizer**: Whether to reset the optimizer when swtiching training stages.
-  - **batch_size_training**: Batch size to train the model per GPU.
-  - **debug**: If true, there is no wandb and model saving. A subset of data will be used.
-  - **gradient_accumulation_steps**: Gradient accumulation steps
-  - **num_epochs**: Maximum training epoches.
-  - **lr**: Learning rate
-  - **weight_decay**: Weight decay
-
-
-## Training
-
-Run the following commands (replacing `N_GPUS` and `PATH_TO_ARGS`):
-
-```
-torchrun --nnodes 1 --nproc_per_node N_GPUS run.py PATH_TO_ARGS
-```
-
-## Reproducing Experiments
-
-Here we provide instructions to reproduce our experiments in the paper.
-
-All the commands below assume 1 * A100 (80GB) GPUs. You may change the corresponding arguments in the config file (`batch_size_training`, `gradient_accumulation_steps`) and `nproc_per_node` when launching the run, to adapt your resources.
-
-
-### GSM8K
-
-Preprocessing data:
-
-```bash
-bash preprocessing/gsm_icot.bash
-```
-
-First train the model with CoT (as the stage 0 training)
-
-```bash
+# Stage 0: supervised CoT warm-up (1 GPU)
 torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_cot.yaml
+
+# Stage ≥1: full Coconut training (4 GPUs recommended)
+torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
 ```
 
-Select a checkpoint as the initialization of Coconut (the validation accuracy is expected to be around 40%). Replace the `load_model_path` in the [args/gsm_coconut.yaml](args/gsm_coconut.yaml) with your selected checkpoint, and run:
+Both configs expect you to update `save_path`, `load_model_path`, and dataset paths before launching.  
+Checkpoint selection and pure evaluation reuse the stock configs from the original Coconut release.
 
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut.yaml
-```
+## Heuristic Latent Memory
 
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/gsm_coconut_eval.yaml](args/gsm_coconut_eval.yaml). To evaluate:
+Our heuristic module (`heuristic.py`) adds a FAISS index, neural projectors, and a nudging network:
 
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut_eval.yaml
-```
+- Configure it via `args/gsm_heuristic.yaml` (key/value dimensions, thresholds, index paths).
+- Set `heuristic_memory` inside your experiment config to activate retrieval-guided inference.
+- When retrieval is enabled, `run.py` persists `retrieval_metrics_epoch_*.json` next to checkpoints.
+- `exps/heuristic/run_experiment.py` provides a lightweight CLI that logs inference-time heuristics to `exps/heuristic/results.jsonl` for downstream analysis.
 
-### ProntoQA
+Before using heuristic memory, ensure FAISS is installed and that the index directory in your config exists (it will be created on demand).
 
-Please clone the official [github repo](https://github.com/asaparov/prontoqa/tree/f0145b867b3c106285ec9ea1941a3f6eb7c6162d) of [ProntoQA](https://arxiv.org/pdf/2210.01240) and generate a raw dataset with:
+## Experiment Playbook
 
-```bash
-cd prontoqa
-python run_experiment.py --model-name json --model-size dummy --ordering random --num-trials 10000 --few-shot-examples 0 --ontology fictional --min-hops 5 --max-hops 5 --hops-skip 1
-```
+Follow this checklist to move from vanilla Coconut to heuristic-augmented runs:
 
-Then copy the generated `5hop_0shot_random.json` file to `data` directory, and preprocess the dataset with:
+0. **Prepare GSM8K data**
+   ```bash
+   bash preprocessing/gsm_icot.bash
+   ```
 
-```bash
-python preprocessing/prontoqa.py
-```
+1. **Train Coconut without retrieval (paper reproduction)**
+   ```bash
+   torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
+   ```
 
+2. **Verify CoT vs. Coconut baselines**
+   ```bash
+   torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_cot.yaml
+   torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut_eval.yaml
+   ```
 
-Then run the following to train the model:
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/prontoqa_coconut.yaml
-```
+3. **Fit the heuristic memory + nudge net (live plot)**
+   ```bash
+   python exps/heuristic/run_experiment.py exps/heuristic/config.yaml
+   ```
+   `config.yaml` targets the GSM8K training split with `train_mode: true`. The run streams a live plot that overlays rolling accuracy against the 34.1% Coconut baseline while the binary nudge loss averages are updated. Every example both trains the nudging MLP and inserts its latents into the FAISS index; weights and index are persisted under `data/index/` when the pass finishes.
 
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
+4. **Evaluate with frozen heuristics on GSM8K test**
+   ```bash
+   python exps/heuristic/run_experiment.py exps/heuristic/config_eval.yaml
+   ```
+   `config_eval.yaml` flips `train_mode: false` so the stored nudges stay fixed. The live chart keeps running, letting you inspect accuracy lift against the baseline as retrieval kicks in without mutating the memory.
 
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut_eval.yaml
-```
-
-
-### ProsQA
-
-The ProsQA dataset is at [data/prosqa_*.json](data).
-
-Then run the following to train the model:
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut.yaml
-```
-
-Find the checkpoint with best validation accuracy, and put the path as `load_model_path` in [args/prosqa_coconut_eval.yaml](args/prosqa_coconut_eval.yaml). To evaluate:
-
-```bash
-torchrun --nnodes 1 --nproc_per_node 1 run.py args/prosqa_coconut_eval.yaml
-```
-
-
-
+5. **Sweep the cosine similarity threshold for retrieval nudges**
+   - Copy `args/gsm_heuristic.yaml` to a scratch file, adjust `heuristic_memory.retrieval_threshold`, and point the run config's `heuristic_memory` field at that copy.
+   - Execute `python exps/heuristic/run_experiment.py exps/heuristic/config_eval.yaml` for each candidate threshold; compare the live accuracy trace and logged metrics to pick the best cutoff.
 
 ## Citation
-If you use this code base in your research, please cite our paper with the following BibTex entry:
+
+If you use the Coconut components in academic work, please cite:
+
 ```bibtex
 @article{hao2024training,
   title={Training Large Language Models to Reason in a Continuous Latent Space},
@@ -228,66 +124,4 @@ If you use this code base in your research, please cite our paper with the follo
 }
 ```
 
-## License
-This code is released under the MIT license (see [LICENSE](LICENSE)).
-
-
-• - Added automatic persistence of retrieval metrics each epoch
-    when retrieval is enabled (run.py:680-705), so evaluations emit
-    retrieval_metrics_epoch_*.json alongside the checkpoints.
-  - Introduced tools/retrieval_report.py:1-139, a compact CLI that
-    inspects the FAISS store and any logged metrics to give you a quick
-    health check after retrieval runs.
-  - Documented the new report utility and usage workflow in the retrieval
-    section of the README (README.md:86-100).
-
-  0. Prepare GSM8K
-      - Run bash preprocessing/gsm_icot.bash to download and convert
-        the dataset into JSON (preprocessing/gsm_icot.bash:6-18,
-        preprocessing/gsm_icot.py:6-31). The files land at data/
-        gsm_train.json, data/gsm_valid.json, and data/gsm_test.json.
-  1. Train Coconut without Retrieval (paper reproduction)
-      - Edit args/gsm_coconut.yaml to set your save_path,
-        load_model_path, and data locations (args/gsm_coconut.yaml:3-
-        34). Retrieval stays off because retrieval.enabled: false in that
-        config (args/gsm_coconut.yaml:36-60).
-      - Launch training, e.g. torchrun --nnodes 1 --nproc_per_node
-        4 run.py args/gsm_coconut.yaml. Checkpoints are stored under
-        <save_path>/<name> (see run.py:314-357).
-
-        Possible checkpoints ([here](https://huggingface.co/Esther22/coconut_Reproduction/discussions))
-
-  2. Build the FAISS Index with Retrieval Enabled
-      - Switch to the evaluation config args/gsm_coconut_eval.yaml,
-        point load_model_path at your best checkpoint, and confirm
-        the index output path (args/gsm_coconut_eval.yaml:3-34, args/
-        gsm_coconut_eval.yaml:36-60).
-      - Key knobs to tune before launching evaluation (run.py:520-735):
-          - Retrieval behaviour: retrieval.k, retrieval.sim_threshold,
-            retrieval.key_dim, retrieval.value_dim, retrieval.metric,
-            retrieval.normalize_keys.
-          - Nudge dynamics: nudge.alpha_max, nudge.clip_radius,
-            nudge.calibration, nudge.exit_threshold, nudge.exit_metric,
-            nudge.match_norm.
-          - Training-side adaptation: training.nudge_contrastive,
-            training.nudge_contrastive_weight,
-            training.retrieval_buffer_limit, training.nudge_buffer_batch.
-          - Index persistence: index.path (default data/index/
-            faiss_index.bin).
-      - Run torchrun ... args/gsm_coconut_eval.yaml. The run now saves
-        retrieval_metrics_epoch_*.json in your save_path/name directory
-        and updates the FAISS index file each epoch (run.py:680-705,
-        run.py:729-735).
-  3. Quick Performance Snapshot
-      - After any retrieval-enabled evaluation, summarise the index and
-        logged metrics with the new utility:
-
-        python tools/retrieval_report.py \
-          --index-path data/index/faiss_index.bin \
-          --metrics-dir /path/to/save_dir
-          - The script reports entry counts, norms, anchor similarities,
-            and a per-epoch overview of ECE, Brier, false exits, mean
-            forward passes, and index size (tools/retrieval_report.py:1-
-            139).
-          - If --metrics-dir is omitted it searches near the index or in
-            the current directory for retrieval_metrics_epoch_*.json.
+We will release a citation for the heuristic latent reasoning extensions as soon as the manuscript is public.
