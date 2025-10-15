@@ -1,11 +1,11 @@
-dataset: data/gsm_train.json
+dataset: data/gsm_test.json
 model_checkpoint: data/checkpoints/gsm/gsm-coconut
-run_id: gsm8k-heuristic-train
+run_id: gsm8k-heuristic-test
 max_examples: null
 max_new_tokens: 128
 num_latent_thoughts: 8
 dry_run: false
-train_mode: true
+train_mode: false
 live_plot: true
 baseline_accuracy: 0.341
 heuristic_memory: args/gsm_heuristic.yaml

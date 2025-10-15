@@ -26,6 +26,7 @@ except ImportError:  # pragma: no cover
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 
 Tensor = torch.Tensor
 
@@ -128,7 +129,9 @@ class RetrievedHeuristic:
     similarity: float
     key_proj: Tensor
     value_proj: Tensor
-    metadata: Optional[Dict[str, Any]]
+    extra: Optional[Dict[str, Any]]
+    raw_k0: Optional[Tensor] = None
+    raw_kn: Optional[Tensor] = None
 
 
 class HeuristicMemory:
@@ -174,6 +177,19 @@ class HeuristicMemory:
         self.nudging_net = NudgingNet(key_dim, value_dim, hidden_dim, llm_latent_dim).to(
             self.device
         )
+        self.nudge_classifier = nn.Linear(llm_latent_dim, 1).to(self.device)
+        self.bce = nn.BCEWithLogitsLoss()
+        self.nudge_lr = float(config.get("nudge_lr", 1e-3))
+        self.optimizer = optim.Adam(
+            list(self.nudging_net.parameters()) + list(self.nudge_classifier.parameters()),
+            lr=self.nudge_lr,
+        )
+        self.nudge_weights_path = Path(
+            config.get(
+                "nudge_weights_path",
+                self.faiss_index_path.parent / "nudge_weights.pt",
+            )
+        )
 
         self.faiss_index_path = Path(config["faiss_index_path"])
         self.metadata_path = Path(config["metadata_path"])
@@ -182,6 +198,7 @@ class HeuristicMemory:
         self.retrieval_threshold = float(config.get("retrieval_threshold", 0.0))
 
         self.load_index()
+        self.load_nudge_net()
 
     # --------------------------------------------------------------------- #
     # Offline utilities                                                     #
@@ -213,6 +230,8 @@ class HeuristicMemory:
                     "key_proj": key_proj.detach().cpu(),
                     "value_proj": value_proj.detach().cpu(),
                     "extra": extra_meta,
+                    "raw_k0": k0.detach().cpu(),
+                    "raw_kn": kn.detach().cpu(),
                 }
             )
 
@@ -251,6 +270,8 @@ class HeuristicMemory:
                 "key_proj": key_proj.detach().cpu(),
                 "value_proj": value_proj.detach().cpu(),
                 "extra": metadata or {},
+                "raw_k0": k0.detach().cpu(),
+                "raw_kn": kn.detach().cpu(),
             }
         )
 
@@ -288,15 +309,21 @@ class HeuristicMemory:
         meta = self.metadata[indices[0][0]]
         retrieved_key = F.normalize(meta["key_proj"], dim=-1)
         retrieved_value = meta["value_proj"]
+        raw_k0 = meta.get("raw_k0")
+        raw_kn = meta.get("raw_kn")
 
         return RetrievedHeuristic(
             similarity=sim_score,
             key_proj=retrieved_key.to(self.device),
             value_proj=retrieved_value.to(self.device),
-            metadata=meta.get("extra"),
+            extra=meta.get("extra"),
+            raw_k0=raw_k0.to(self.device) if raw_k0 is not None else None,
+            raw_kn=raw_kn.to(self.device) if raw_kn is not None else None,
         )
 
-    def get_nudge(self, observed_k0: Tensor) -> Tuple[Optional[Tensor], Dict[str, Any]]:
+    def get_nudge(
+        self, observed_k0: Tensor
+    ) -> Tuple[Optional[Tensor], Dict[str, Any], Optional[RetrievedHeuristic]]:
         """
         Computes the nudge vector for the current problem if a suitable heuristic
         exists in the memory.
@@ -315,7 +342,9 @@ class HeuristicMemory:
                 "retrieval_success": False,
                 "retrieval_similarity_score": None,
                 "retrieved_neighbor_id": None,
-            }
+                "nudge_probability": None,
+                "nudge_applied": False,
+            }, None
 
         observed_proj = self.key_projector(observed_k0.unsqueeze(0))
         nudge = self.nudging_net(
@@ -323,15 +352,63 @@ class HeuristicMemory:
             retrieval.key_proj.unsqueeze(0),
             retrieval.value_proj.unsqueeze(0),
         )
+        logit = self.nudge_classifier(nudge)
+        prob = torch.sigmoid(logit).item()
+        scaled_nudge = nudge.squeeze(0) * torch.sigmoid(logit).squeeze()
 
         log_info = {
             "retrieval_success": True,
             "retrieval_similarity_score": retrieval.similarity,
-            "retrieved_neighbor_id": retrieval.metadata.get("problem_id")
-            if retrieval.metadata
+            "retrieved_neighbor_id": retrieval.extra.get("problem_id")
+            if retrieval.extra
             else None,
+            "nudge_probability": prob,
+            "nudge_applied": True,
         }
-        return nudge.squeeze(0), log_info
+        return scaled_nudge, log_info, retrieval
+
+    def compute_logit(
+        self, observed_k0: Tensor, retrieved: RetrievedHeuristic
+    ) -> Tensor:
+        observed_proj = self.key_projector(observed_k0.unsqueeze(0))
+        nudge = self.nudging_net(
+            observed_proj,
+            retrieved.key_proj.unsqueeze(0),
+            retrieved.value_proj.unsqueeze(0),
+        )
+        logit = self.nudge_classifier(nudge)
+        return logit.view(1)
+
+    def train_step(
+        self, observed_k0: Tensor, retrieved: RetrievedHeuristic, target: Tensor
+    ) -> Tuple[float, float]:
+        self.nudging_net.train()
+        self.nudge_classifier.train()
+        self.optimizer.zero_grad()
+        logit = self.compute_logit(observed_k0, retrieved)
+        loss = self.bce(logit, target.view_as(logit))
+        loss.backward()
+        self.optimizer.step()
+        prob = torch.sigmoid(logit.detach()).item()
+        return loss.item(), prob
+
+    def eval_step(
+        self,
+        observed_k0: Tensor,
+        retrieved: RetrievedHeuristic,
+        target: Optional[Tensor] = None,
+    ) -> Tuple[float, Optional[float]]:
+        self.nudging_net.eval()
+        self.nudge_classifier.eval()
+        with torch.no_grad():
+            logit = self.compute_logit(observed_k0, retrieved)
+            prob = torch.sigmoid(logit).item()
+            loss = (
+                self.bce(logit, target.view_as(logit)).item()
+                if target is not None
+                else None
+            )
+        return prob, loss
 
     # --------------------------------------------------------------------- #
     # Persistence                                                           #
@@ -358,6 +435,30 @@ class HeuristicMemory:
             self.metadata = pickle.load(f)
 
     # --------------------------------------------------------------------- #
+    # Nudge network persistence                                             #
+    # --------------------------------------------------------------------- #
+
+    def save_nudge_net(self) -> None:
+        self.nudging_net.eval()
+        self.nudge_classifier.eval()
+        self.nudge_weights_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "nudging_net": self.nudging_net.state_dict(),
+                "classifier": self.nudge_classifier.state_dict(),
+            },
+            self.nudge_weights_path,
+        )
+
+    def load_nudge_net(self) -> None:
+        if self.nudge_weights_path.exists():
+            state = torch.load(self.nudge_weights_path, map_location=self.device)
+            if "nudging_net" in state:
+                self.nudging_net.load_state_dict(state["nudging_net"])
+            else:
+                self.nudging_net.load_state_dict(state)
+            if "classifier" in state:
+                self.nudge_classifier.load_state_dict(state["classifier"])
     # Internal helpers                                                      #
     # --------------------------------------------------------------------- #
 
