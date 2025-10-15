@@ -260,10 +260,10 @@ class HeuristicMemory:
         k0 = k0.to(self.device)
         kn = kn.to(self.device)
 
-        key_proj = self.key_projector(k0.unsqueeze(0)).squeeze(0)
-        value_proj = self.value_projector(kn.unsqueeze(0)).squeeze(0)
+        key_proj = self.key_projector(k0.unsqueeze(0)).squeeze(0).detach()
+        value_proj = self.value_projector(kn.unsqueeze(0)).squeeze(0).detach()
 
-        self._add_to_index(key_proj.unsqueeze(0).cpu())
+        self._add_to_index(key_proj.unsqueeze(0))
         self.metadata.append(
             {
                 "key_proj": key_proj.detach().cpu(),
@@ -464,6 +464,6 @@ class HeuristicMemory:
         if self.index is None:
             raise RuntimeError("FAISS index has not been initialised.")
 
-        keys = projected_keys.float()
+        keys = projected_keys.float().detach()
         keys = F.normalize(keys, dim=-1)
         self.index.add(keys.cpu().numpy())
