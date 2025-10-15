@@ -164,6 +164,9 @@ class HeuristicMemory:
         llm_latent_dim = int(config["llm_latent_dim"])
         hidden_dim = int(config["nudge_net_hidden_dim"])
 
+        self.faiss_index_path = Path(config["faiss_index_path"])
+        self.metadata_path = Path(config["metadata_path"])
+
         # FAISS index (cosine similarity via inner product on L2-normalised vectors).
         self.index: Optional[faiss.IndexFlatIP] = None
         self._init_index(key_dim)
@@ -184,15 +187,13 @@ class HeuristicMemory:
             list(self.nudging_net.parameters()) + list(self.nudge_classifier.parameters()),
             lr=self.nudge_lr,
         )
+        default_nudge_weights = self.faiss_index_path.parent / "nudge_weights.pt"
         self.nudge_weights_path = Path(
             config.get(
                 "nudge_weights_path",
-                self.faiss_index_path.parent / "nudge_weights.pt",
+                default_nudge_weights,
             )
         )
-
-        self.faiss_index_path = Path(config["faiss_index_path"])
-        self.metadata_path = Path(config["metadata_path"])
 
         self.k_neighbors = int(config.get("k_neighbors", 1))
         self.retrieval_threshold = float(config.get("retrieval_threshold", 0.0))

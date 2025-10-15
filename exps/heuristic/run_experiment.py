@@ -187,6 +187,8 @@ def main() -> None:
         "seen": 0,
         "loss_sum": 0.0,
         "loss_count": 0,
+        "retrieval_attempts": 0,
+        "retrieval_successes": 0,
     }
 
     plotter = LivePlot("Heuristic Accuracy", baseline=baseline_accuracy) if live_plot else None
@@ -219,6 +221,12 @@ def main() -> None:
         output_ids = result["output_ids"]
         log_info = result["log_info"]
 
+        attempted_retrieval = heuristic_memory is not None and num_latent_thoughts > 0
+        if attempted_retrieval:
+            stats["retrieval_attempts"] += 1
+            if log_info.get("retrieval_success"):
+                stats["retrieval_successes"] += 1
+
         is_correct = compare_answers(predicted, ground_truth)
         stats["seen"] += 1
         stats["correct"] += int(is_correct)
@@ -244,15 +252,30 @@ def main() -> None:
         else:
             rolling_loss = None
 
-        if plotter is not None:
-            plotter.update(stats["seen"], accuracy, rolling_loss)
-
         if train_mode:
             final_latent = final_hidden(model_bundle[0], output_ids)
             heuristic_memory.add(
                 observed_k0,
                 final_latent,
                 metadata={"problem_id": problem_id, "is_correct": bool(is_correct)},
+            )
+
+        faiss_index_size = (
+            heuristic_memory.index.ntotal if heuristic_memory.index is not None else 0
+        )
+        retrieval_success_rate = (
+            stats["retrieval_successes"] / stats["retrieval_attempts"]
+            if stats["retrieval_attempts"] > 0
+            else None
+        )
+
+        if plotter is not None:
+            plotter.update(
+                stats["seen"],
+                accuracy,
+                rolling_loss,
+                faiss_entries=faiss_index_size,
+                retrieval_success_rate=retrieval_success_rate,
             )
 
         logger.log_inference(
@@ -273,12 +296,13 @@ def main() -> None:
             },
             extra_metrics={
                 "raw_completion": raw_completion,
-                "faiss_index_size": heuristic_memory.index.ntotal
-                if heuristic_memory.index is not None
-                else None,
+                "faiss_index_size": faiss_index_size,
                 "training_problems_processed": stats["seen"],
                 "rolling_accuracy": accuracy,
                 "rolling_loss": rolling_loss,
+                "retrieval_success_rate": retrieval_success_rate,
+                "retrieval_attempts": stats["retrieval_attempts"],
+                "retrieval_successes": stats["retrieval_successes"],
                 "baseline_accuracy": baseline_accuracy,
                 "mode": "train" if train_mode else "test",
             },
