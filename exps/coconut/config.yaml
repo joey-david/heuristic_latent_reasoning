@@ -1,0 +1,11 @@
+dataset: data/gsm_test.json
+model_checkpoint: data/checkpoints/gsm/gsm-coconut
+model_id: openai-community/gpt2
+run_id: gsm8k-coconut-eval
+max_examples: null
+max_new_tokens: 160
+c_thought: 2
+max_latent_stage: 3
+latent_stage: null
+latent_tokens: null
+dry_run: false
