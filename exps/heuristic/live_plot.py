@@ -4,34 +4,105 @@ import matplotlib.pyplot as plt
 class LivePlot:
     def __init__(self, title: str, baseline: float | None = None) -> None:
         plt.ion()
-        self.fig, self.ax = plt.subplots()
-        self.ax.set_title(title)
-        self.ax.set_xlabel("examples")
-        self.ax.set_ylabel("metric")
-        (self.acc_line,) = self.ax.plot([], [], label="accuracy")
-        (self.loss_line,) = self.ax.plot([], [], label="avg_loss")
-        self.ax.legend(loc="lower right")
-        self.steps: list[int] = []
+        self.fig, (self.ax_perf, self.ax_memory) = plt.subplots(
+            2, 1, sharex=True, figsize=(8, 8)
+        )
+        self.ax_perf.set_title(title)
+        self.ax_memory.set_xlabel("examples")
+        self.ax_perf.set_ylabel("accuracy (%)")
+        self.ax_memory.set_ylabel("faiss entries")
+
+        self.ax_loss = self.ax_perf.twinx()
+        self.ax_loss.set_ylabel("avg loss")
+        self.ax_success = self.ax_memory.twinx()
+        self.ax_success.set_ylabel("success rate (%)")
+
+        (self.acc_line,) = self.ax_perf.plot(
+            [], [], label="accuracy (%)", color="#1f77b4"
+        )
+        (self.loss_line,) = self.ax_loss.plot(
+            [], [], label="avg loss", color="#ff7f0e"
+        )
+        (self.entry_line,) = self.ax_memory.plot(
+            [], [], label="faiss entries", color="#2ca02c"
+        )
+        (self.success_line,) = self.ax_success.plot(
+            [], [], label="retrieval success (%)", color="#d62728"
+        )
+
+        self.perf_steps: list[int] = []
         self.acc_vals: list[float] = []
+        self.loss_steps: list[int] = []
         self.loss_vals: list[float] = []
+        self.memory_steps: list[int] = []
+        self.entry_vals: list[int] = []
+        self.success_steps: list[int] = []
+        self.success_vals: list[float] = []
+
         self.baseline = baseline
+        self.baseline_line = None
         if baseline is not None:
-            self.ax.axhline(baseline * 100.0, color="gray", linestyle="--", linewidth=1)
+            self.baseline_line = self.ax_perf.axhline(
+                baseline * 100.0,
+                color="gray",
+                linestyle="--",
+                linewidth=1,
+                label="baseline",
+            )
 
-    def update(self, step: int, accuracy: float, avg_loss: float | None = None) -> None:
-        from math import isnan
+        self._refresh_legends()
 
-        loss = avg_loss if avg_loss is not None else float("nan")
-        self.steps.append(step)
+    def _refresh_legends(self) -> None:
+        perf_handles = [self.acc_line, self.loss_line]
+        if self.baseline_line is not None:
+            perf_handles.append(self.baseline_line)
+        self.ax_perf.legend(
+            perf_handles, [handle.get_label() for handle in perf_handles], loc="lower right"
+        )
+        memory_handles = [self.entry_line, self.success_line]
+        self.ax_memory.legend(
+            memory_handles,
+            [handle.get_label() for handle in memory_handles],
+            loc="upper left",
+        )
+
+    def update(
+        self,
+        step: int,
+        accuracy: float,
+        avg_loss: float | None = None,
+        *,
+        faiss_entries: int | None = None,
+        retrieval_success_rate: float | None = None,
+    ) -> None:
+        self.perf_steps.append(step)
         self.acc_vals.append(accuracy * 100.0)
-        self.loss_vals.append(loss)
-        self.acc_line.set_data(self.steps, self.acc_vals)
-        if not all(isnan(v) for v in self.loss_vals):
-            self.loss_line.set_data(self.steps, self.loss_vals)
-        else:
-            self.loss_line.set_data([], [])
-        self.ax.relim()
-        self.ax.autoscale_view()
+        self.acc_line.set_data(self.perf_steps, self.acc_vals)
+
+        if avg_loss is not None:
+            self.loss_steps.append(step)
+            self.loss_vals.append(avg_loss)
+        self.loss_line.set_data(self.loss_steps, self.loss_vals)
+
+        if faiss_entries is not None:
+            self.memory_steps.append(step)
+            self.entry_vals.append(faiss_entries)
+        self.entry_line.set_data(self.memory_steps, self.entry_vals)
+
+        if retrieval_success_rate is not None:
+            self.success_steps.append(step)
+            self.success_vals.append(retrieval_success_rate * 100.0)
+        self.success_line.set_data(self.success_steps, self.success_vals)
+
+        self.ax_perf.relim()
+        self.ax_perf.autoscale_view()
+        self.ax_loss.relim()
+        self.ax_loss.autoscale_view()
+        self.ax_memory.relim()
+        self.ax_memory.autoscale_view()
+        self.ax_success.relim()
+        self.ax_success.autoscale_view()
+
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         plt.pause(0.01)
