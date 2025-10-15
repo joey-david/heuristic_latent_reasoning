@@ -1,8 +1,8 @@
 # need 4 gpus
 
 project: coconut
-save_path: data/checkpoints/gsm/cot
-name: gsm-cot
+save_path: data/checkpoints/gsm
+name: gsm-cot-train
 
 only_eval: False
 
