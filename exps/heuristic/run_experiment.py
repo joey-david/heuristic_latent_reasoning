@@ -186,6 +186,12 @@ def main() -> None:
         heuristic_memory_cfg = heuristic_memory_cfg["heuristic_memory"]
     heuristic_memory = HeuristicMemory(heuristic_memory_cfg)
 
+    memory_warmup = max(0, int(config.get("memory_warmup", 75)))
+    memory_stride = max(1, int(config.get("memory_stride", 2)))
+    memory_max_entries = max(1, int(config.get("memory_max_entries", 3000)))
+    novelty_cap = float(config.get("memory_novelty_cap", 0.95))
+    novelty_cap = max(0.0, min(1.0, novelty_cap))
+
     stats = {
         "correct": 0,
         "seen": 0,
@@ -193,6 +199,8 @@ def main() -> None:
         "loss_count": 0,
         "retrieval_attempts": 0,
         "retrieval_successes": 0,
+        "retrieval_success_correct": 0,
+        "memory_additions": 0,
     }
 
     plotter = (
@@ -239,6 +247,9 @@ def main() -> None:
             stats["retrieval_attempts"] += 1
             if log_info.get("retrieval_success"):
                 stats["retrieval_successes"] += 1
+                if is_correct:
+                    stats["retrieval_success_correct"] += 1
+        log_info["retrieval_attempted"] = attempted_retrieval
 
         is_correct = compare_answers(predicted, ground_truth)
         stats["seen"] += 1
@@ -265,20 +276,46 @@ def main() -> None:
         else:
             rolling_loss = None
 
-        if train_mode:
+        should_add = False
+        if train_mode and heuristic_memory is not None:
+            index_size = heuristic_memory.index.ntotal if heuristic_memory.index is not None else 0
+            best_sim = float(log_info.get("retrieval_similarity_score") or 0.0)
+            retrieval_success = bool(log_info.get("retrieval_success"))
+            novel = (not retrieval_success) or (best_sim < novelty_cap)
+            if (
+                is_correct
+                and stats["seen"] > memory_warmup
+                and novel
+                and (memory_stride <= 1 or (stats["correct"] % memory_stride == 0))
+                and index_size < memory_max_entries
+            ):
+                should_add = True
+
+        if should_add:
             final_latent = final_hidden(model_bundle[0], output_ids)
             heuristic_memory.add(
                 observed_k0,
                 final_latent,
                 metadata={"problem_id": problem_id, "is_correct": bool(is_correct)},
             )
+            stats["memory_additions"] += 1
+        log_info["memory_candidate_added"] = should_add
 
         faiss_index_size = (
             heuristic_memory.index.ntotal if heuristic_memory.index is not None else 0
         )
+        log_info["memory_index_size"] = faiss_index_size
         retrieval_success_rate = (
             stats["retrieval_successes"] / stats["retrieval_attempts"]
             if stats["retrieval_attempts"] > 0
+            else None
+        )
+        retrieval_frequency = (
+            stats["retrieval_attempts"] / stats["seen"] if stats["seen"] > 0 else None
+        )
+        retrieval_guidance_success = (
+            stats["retrieval_success_correct"] / stats["retrieval_successes"]
+            if stats["retrieval_successes"] > 0
             else None
         )
 
@@ -289,6 +326,9 @@ def main() -> None:
                 rolling_loss,
                 faiss_entries=faiss_index_size,
                 retrieval_success_rate=retrieval_success_rate,
+                retrieval_attempts=stats["retrieval_attempts"],
+                retrieval_frequency=retrieval_frequency,
+                retrieval_guidance_success=retrieval_guidance_success,
             )
 
         logger.log_inference(
@@ -301,11 +341,14 @@ def main() -> None:
             inference_time_ms=elapsed_ms,
             heuristic_metrics={
                 "retrieval_success": log_info.get("retrieval_success"),
+                "retrieval_attempted": log_info.get("retrieval_attempted"),
                 "retrieved_neighbor_id": log_info.get("retrieved_neighbor_id"),
                 "retrieval_similarity_score": log_info.get("retrieval_similarity_score"),
                 "nudge_probability": log_info.get("nudge_probability"),
                 "nudge_applied": log_info.get("nudge_applied"),
                 "nudge_loss": log_info.get("nudge_loss"),
+                "memory_candidate_added": log_info.get("memory_candidate_added"),
+                "memory_index_size": log_info.get("memory_index_size"),
             },
             extra_metrics={
                 "raw_completion": raw_completion,
@@ -316,8 +359,11 @@ def main() -> None:
                 "retrieval_success_rate": retrieval_success_rate,
                 "retrieval_attempts": stats["retrieval_attempts"],
                 "retrieval_successes": stats["retrieval_successes"],
+                "retrieval_frequency": retrieval_frequency,
+                "retrieval_guidance_success": retrieval_guidance_success,
                 "baseline_accuracy": baseline_accuracy,
                 "mode": "train" if train_mode else "test",
+                "memory_additions": stats["memory_additions"],
             },
         )
 

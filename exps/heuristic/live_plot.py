@@ -20,17 +20,17 @@ class LivePlot:
         else:
             plt.ioff()
         self.fig, (self.ax_perf, self.ax_memory) = plt.subplots(
-            2, 1, sharex=True, figsize=(8, 8)
+            2, 1, sharex=True, figsize=(8, 9)
         )
         self.ax_perf.set_title(title)
         self.ax_memory.set_xlabel("examples")
         self.ax_perf.set_ylabel("accuracy (%)")
-        self.ax_memory.set_ylabel("faiss entries")
+        self.ax_memory.set_ylabel("counts")
 
         self.ax_loss = self.ax_perf.twinx()
         self.ax_loss.set_ylabel("avg loss")
         self.ax_success = self.ax_memory.twinx()
-        self.ax_success.set_ylabel("success rate (%)")
+        self.ax_success.set_ylabel("rates (%)")
 
         (self.acc_line,) = self.ax_perf.plot(
             [], [], label="accuracy (%)", color="#1f77b4"
@@ -41,8 +41,17 @@ class LivePlot:
         (self.entry_line,) = self.ax_memory.plot(
             [], [], label="faiss entries", color="#2ca02c"
         )
+        (self.attempt_line,) = self.ax_memory.plot(
+            [], [], label="retrieval attempts", color="#17becf"
+        )
         (self.success_line,) = self.ax_success.plot(
             [], [], label="retrieval success (%)", color="#d62728"
+        )
+        (self.freq_line,) = self.ax_success.plot(
+            [], [], label="retrieval frequency (%)", color="#9467bd"
+        )
+        (self.guidance_line,) = self.ax_success.plot(
+            [], [], label="guided accuracy (%)", color="#8c564b"
         )
 
         self.perf_steps: list[int] = []
@@ -51,8 +60,14 @@ class LivePlot:
         self.loss_vals: list[float] = []
         self.memory_steps: list[int] = []
         self.entry_vals: list[int] = []
+        self.attempt_steps: list[int] = []
+        self.attempt_vals: list[int] = []
         self.success_steps: list[int] = []
         self.success_vals: list[float] = []
+        self.freq_steps: list[int] = []
+        self.freq_vals: list[float] = []
+        self.guidance_steps: list[int] = []
+        self.guidance_vals: list[float] = []
 
         self.baseline = baseline
         self.baseline_line = None
@@ -80,7 +95,13 @@ class LivePlot:
         self.ax_perf.legend(
             perf_handles, [handle.get_label() for handle in perf_handles], loc="lower right"
         )
-        memory_handles = [self.entry_line, self.success_line]
+        memory_handles = [
+            self.entry_line,
+            self.attempt_line,
+            self.success_line,
+            self.freq_line,
+            self.guidance_line,
+        ]
         self.ax_memory.legend(
             memory_handles,
             [handle.get_label() for handle in memory_handles],
@@ -95,6 +116,9 @@ class LivePlot:
         *,
         faiss_entries: int | None = None,
         retrieval_success_rate: float | None = None,
+        retrieval_attempts: int | None = None,
+        retrieval_frequency: float | None = None,
+        retrieval_guidance_success: float | None = None,
     ) -> None:
         self.perf_steps.append(step)
         self.acc_vals.append(accuracy * 100.0)
@@ -110,10 +134,25 @@ class LivePlot:
             self.entry_vals.append(faiss_entries)
         self.entry_line.set_data(self.memory_steps, self.entry_vals)
 
+        if retrieval_attempts is not None:
+            self.attempt_steps.append(step)
+            self.attempt_vals.append(retrieval_attempts)
+        self.attempt_line.set_data(self.attempt_steps, self.attempt_vals)
+
         if retrieval_success_rate is not None:
             self.success_steps.append(step)
             self.success_vals.append(retrieval_success_rate * 100.0)
         self.success_line.set_data(self.success_steps, self.success_vals)
+
+        if retrieval_frequency is not None:
+            self.freq_steps.append(step)
+            self.freq_vals.append(retrieval_frequency * 100.0)
+        self.freq_line.set_data(self.freq_steps, self.freq_vals)
+
+        if retrieval_guidance_success is not None:
+            self.guidance_steps.append(step)
+            self.guidance_vals.append(retrieval_guidance_success * 100.0)
+        self.guidance_line.set_data(self.guidance_steps, self.guidance_vals)
 
         self.ax_perf.relim()
         self.ax_perf.autoscale_view()

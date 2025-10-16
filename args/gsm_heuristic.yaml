@@ -6,18 +6,19 @@ defaults:
 # Heuristic Memory Configuration
 heuristic_memory:
   # Paths
-  faiss_index_path: "data/index/gsm_faiss_index.bin"
-  metadata_path: "data/index/gsm_index_metadata.pkl"
+  faiss_index_path: "data/checkpoints/gsm/faiss/index.ip"
+  metadata_path: "data/checkpoints/gsm/faiss/meta.pkl"
+  nudge_weights_path: "data/checkpoints/gsm/faiss/nudge.pt"
 
   # Dimensionality
   # Dimension of the key stored in FAISS (after projection)
-  key_dim: 128
+  key_dim: 64
   # Dimension of the value stored alongside the key (after projection)
   value_dim: 128
 
   # Retrieval Control
   # Cosine similarity threshold for applying a nudge. If below, no nudge is used.
-  retrieval_threshold: 0.9
+  retrieval_threshold: 0.6
   # Number of neighbors to retrieve
   k_neighbors: 1
 
@@ -26,3 +27,5 @@ heuristic_memory:
   nudge_net_hidden_dim: 256
   # The final output dimension must match the LLM's latent dimension (e.g., 768 for gpt2-small)
   llm_latent_dim: 768
+  # Optimisation for the online nudge learner
+  nudge_lr: 0.0003
