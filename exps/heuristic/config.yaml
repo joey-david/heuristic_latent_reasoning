@@ -7,6 +7,6 @@ num_latent_thoughts: 8
 dry_run: false
 train_mode: true
 live_plot: true
-baseline_accuracy: 0.99
-retrieval_threshold: 0.6
+baseline_accuracy: 0.341
+retrieval_threshold: 0.99
 heuristic_memory: args/gsm_heuristic.yaml
