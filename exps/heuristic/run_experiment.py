@@ -1,6 +1,7 @@
 import json
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -277,6 +278,7 @@ def main() -> None:
         "nudge_prob_sum": 0.0,
         "nudge_prob_count": 0,
     }
+    recent_nudge_norms: deque[float] = deque(maxlen=5)
 
     plotter = (
         LivePlot(
@@ -352,10 +354,12 @@ def main() -> None:
         else:
             rolling_loss = None
 
-        nudge_norm_pg = log_info.get("nudge_norm_pre_gate")
-        if nudge_norm_pg is not None:
-            stats["nudge_norm_sum"] += float(nudge_norm_pg)
+        nudge_norm_returned = log_info.get("nudge_norm_returned")
+        if nudge_norm_returned is not None:
+            norm_val = float(nudge_norm_returned)
+            stats["nudge_norm_sum"] += norm_val
             stats["nudge_norm_count"] += 1
+            recent_nudge_norms.append(norm_val)
 
         nudge_scale_val = log_info.get("nudge_scale")
         if nudge_scale_val is not None:
@@ -430,9 +434,14 @@ def main() -> None:
             if stats["retrieval_successes"] > 0
             else None
         )
-        nudge_norm_mean = (
+        nudge_norm_global_mean = (
             stats["nudge_norm_sum"] / stats["nudge_norm_count"]
             if stats["nudge_norm_count"] > 0
+            else None
+        )
+        nudge_norm_recent_mean = (
+            sum(recent_nudge_norms) / len(recent_nudge_norms)
+            if recent_nudge_norms
             else None
         )
         nudge_scale_mean = (
@@ -476,7 +485,7 @@ def main() -> None:
                 faiss_entries=faiss_index_size,
                 retrieval_success_rate=retrieval_success_rate,
                 retrieval_guidance_success=retrieval_guidance_success,
-                nudge_norm_mean=nudge_norm_mean,
+                nudge_norm_window_mean=nudge_norm_recent_mean,
                 nudge_scale_mean=nudge_scale_mean,
                 nudge_prob_mean=nudge_prob_mean,
                 nudge_applied_rate=nudge_applied_rate,
@@ -522,7 +531,8 @@ def main() -> None:
                 "retrieval_successes": stats["retrieval_successes"],
                 "retrieval_frequency": retrieval_frequency,
                 "retrieval_guidance_success": retrieval_guidance_success,
-                "nudge_norm_mean": nudge_norm_mean,
+                "nudge_norm_mean": nudge_norm_global_mean,
+                "nudge_norm_mean_last5": nudge_norm_recent_mean,
                 "nudge_scale_mean": nudge_scale_mean,
                 "nudge_prob_mean": nudge_prob_mean,
                 "nudge_applied_rate": nudge_applied_rate,
