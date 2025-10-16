@@ -223,7 +223,6 @@ def main() -> None:
     live_plot_save_every = int(config.get("live_plot_save_every", 10))
     if live_plot_save_every <= 0:
         live_plot_save_every = 10
-    baseline_accuracy = float(config.get("baseline_accuracy", 0.341))
 
     model_checkpoint = config.get("model_checkpoint")
     model_id = config.get("model_id", "openai-community/gpt2")
@@ -282,7 +281,6 @@ def main() -> None:
     plotter = (
         LivePlot(
             "Heuristic Accuracy",
-            baseline=baseline_accuracy,
             save_path=live_plot_path,
             interactive=live_plot_interactive,
             save_every=live_plot_save_every,
@@ -477,8 +475,6 @@ def main() -> None:
                 rolling_loss,
                 faiss_entries=faiss_index_size,
                 retrieval_success_rate=retrieval_success_rate,
-                retrieval_attempts=stats["retrieval_attempts"],
-                retrieval_frequency=retrieval_frequency,
                 retrieval_guidance_success=retrieval_guidance_success,
                 nudge_norm_mean=nudge_norm_mean,
                 nudge_scale_mean=nudge_scale_mean,
@@ -532,7 +528,6 @@ def main() -> None:
                 "nudge_applied_rate": nudge_applied_rate,
                 "nudged_accuracy": nudged_accuracy,
                 "non_nudged_accuracy": non_nudged_accuracy,
-                "baseline_accuracy": baseline_accuracy,
                 "mode": "train" if train_mode else "test",
                 "memory_additions": stats["memory_additions"],
             },
