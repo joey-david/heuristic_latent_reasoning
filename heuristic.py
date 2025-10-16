@@ -530,7 +530,7 @@ class HeuristicMemory:
     ) -> Tuple[Tensor, float, float, float]:
         scale_floor = self.nudge_scale_min
         scale = scale_floor + (1.0 - scale_floor) * prob
-        scaled = raw_nudge * scale
+        scaled = self._cap_norm(raw_nudge * scale)
         scaled_norm = scaled.detach().norm().item()
         return scaled, scale, scale_floor, scaled_norm
 

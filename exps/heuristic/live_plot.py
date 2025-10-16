@@ -1,7 +1,48 @@
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, Optional, Union
+
+import yaml
 
 import matplotlib.pyplot as plt
+
+
+class YamlMetricsRecorder:
+    """Keeps a bounded YAML summary of recent metrics for LLM consumption."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        max_entries: int = 96,
+        metadata: Optional[Dict[str, float]] = None,
+    ) -> None:
+        self.path = path
+        self.max_entries = max_entries
+        self.metadata = metadata or {}
+        self.entries: list[Dict[str, Union[float, int, str]]] = []
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(self, entry: Dict[str, Optional[float]]) -> None:
+        filtered: Dict[str, float | int | str] = {}
+        for key, value in entry.items():
+            if value is None:
+                continue
+            if isinstance(value, float):
+                filtered[key] = float(value)
+            elif isinstance(value, int):
+                filtered[key] = int(value)
+            else:
+                filtered[key] = value
+        self.entries.append(filtered)
+        if len(self.entries) > self.max_entries:
+            self.entries = self.entries[-self.max_entries :]
+        payload: Dict[str, Union[Dict[str, float], list[Dict[str, Union[float, int, str]]]]] = {
+            "history": self.entries
+        }
+        if self.metadata:
+            payload["metadata"] = self.metadata
+        with self.path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(payload, handle, sort_keys=False)
 
 
 class LivePlot:
@@ -61,7 +102,7 @@ class LivePlot:
             [], [], label="nudge applied (%)", color="#7f7f7f", linestyle="--"
         )
         (self.nudge_norm_line,) = self.ax_nudge.plot(
-            [], [], label="mean nudge norm", color="#17becf"
+            [], [], label="mean nudge norm (last5)", color="#17becf"
         )
         (self.nudge_scale_line,) = self.ax_nudge_scale.plot(
             [], [], label="mean nudge scale", color="#d62728", linestyle="--"
@@ -106,11 +147,20 @@ class LivePlot:
 
         self._refresh_legends()
 
+        self.yaml_recorder: Optional[YamlMetricsRecorder]
+
         if save_path is not None:
             self.save_path: Optional[Path] = Path(save_path)
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
+            yaml_metadata = {}
+            if baseline is not None:
+                yaml_metadata["baseline_pct"] = baseline * 100.0
+            self.yaml_recorder = YamlMetricsRecorder(
+                self.save_path.with_suffix(".yaml"), metadata=yaml_metadata
+            )
         else:
             self.save_path = None
+            self.yaml_recorder = None
 
         self.save_every: Optional[int] = None
         if save_every is None:
@@ -156,7 +206,7 @@ class LivePlot:
         faiss_entries: int | None = None,
         retrieval_success_rate: float | None = None,
         retrieval_guidance_success: float | None = None,
-        nudge_norm_mean: float | None = None,
+        nudge_norm_window_mean: float | None = None,
         nudge_scale_mean: float | None = None,
         nudge_prob_mean: float | None = None,
         nudge_applied_rate: float | None = None,
@@ -204,9 +254,9 @@ class LivePlot:
             self.applied_vals.append(nudge_applied_rate * 100.0)
         self.applied_line.set_data(self.applied_steps, self.applied_vals)
 
-        if nudge_norm_mean is not None:
+        if nudge_norm_window_mean is not None:
             self.nudge_norm_steps.append(step)
-            self.nudge_norm_vals.append(nudge_norm_mean)
+            self.nudge_norm_vals.append(nudge_norm_window_mean)
         self.nudge_norm_line.set_data(self.nudge_norm_steps, self.nudge_norm_vals)
 
         if nudge_scale_mean is not None:
@@ -237,6 +287,24 @@ class LivePlot:
         if self.interactive:
             self.fig.canvas.flush_events()
             plt.pause(0.01)
+
+        if self.yaml_recorder is not None:
+            self.yaml_recorder.record(
+                {
+                    "step": int(step),
+                    "accuracy_pct": self.acc_vals[-1] if self.acc_vals else None,
+                    "nudged_accuracy_pct": self.nudged_acc_vals[-1] if self.nudged_acc_vals else None,
+                    "non_nudged_accuracy_pct": self.non_nudged_acc_vals[-1] if self.non_nudged_acc_vals else None,
+                    "avg_loss": self.loss_vals[-1] if self.loss_vals else None,
+                    "faiss_entries": self.entry_vals[-1] if self.entry_vals else None,
+                    "retrieval_success_pct": self.success_vals[-1] if self.success_vals else None,
+                    "guided_accuracy_pct": self.guidance_vals[-1] if self.guidance_vals else None,
+                    "nudge_applied_pct": self.applied_vals[-1] if self.applied_vals else None,
+                    "nudge_norm_last5": self.nudge_norm_vals[-1] if self.nudge_norm_vals else None,
+                    "nudge_scale_mean": self.nudge_scale_vals[-1] if self.nudge_scale_vals else None,
+                    "nudge_prob_mean": self.nudge_prob_vals[-1] if self.nudge_prob_vals else None,
+                }
+            )
 
         if self.save_path is not None and self.save_every is not None:
             if len(self.perf_steps) % self.save_every == 0:
