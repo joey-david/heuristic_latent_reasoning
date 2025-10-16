@@ -125,3 +125,6 @@ If you use the Coconut components in academic work, please cite:
 ```
 
 We will release a citation for the heuristic latent reasoning extensions as soon as the manuscript is public.
+
+observed accuracy of cot trained model: 0.404 on 1000 samples
+observed accuracy of coconut trained model: 0.306 on 1000 samples

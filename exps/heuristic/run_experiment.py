@@ -109,6 +109,7 @@ def generate_with_heuristic(
         "retrieval_similarity_score": None,
         "retrieved_neighbor_id": None,
         "nudge_probability": None,
+        "nudge_probability_threshold": None,
         "nudge_applied": False,
         "nudge_loss": None,
         "nudge_scale": None,
@@ -116,6 +117,8 @@ def generate_with_heuristic(
         "nudge_norm_pre_gate": None,
         "nudge_norm_post_scale": None,
         "nudge_norm_returned": None,
+        "retrieval_threshold": None,
+        "retrieval_index": None,
     }
 
     if heuristic_memory is not None and latent_tokens > 0:
@@ -374,6 +377,15 @@ def main() -> None:
             stats["nudge_not_applied"] += 1
             stats["nudge_not_applied_correct"] += int(is_correct)
 
+        retrieval_index = log_info.get("retrieval_index")
+        if heuristic_memory is not None and retrieval_index is not None:
+            helpful_flag: Optional[bool]
+            if nudge_applied:
+                helpful_flag = bool(is_correct)
+            else:
+                helpful_flag = None
+            heuristic_memory.update_feedback(int(retrieval_index), helpful=helpful_flag)
+
         should_add = False
         if train_mode and heuristic_memory is not None:
             index_size = heuristic_memory.index.ntotal if heuristic_memory.index is not None else 0
@@ -451,6 +463,13 @@ def main() -> None:
             else None
         )
 
+        if (
+            heuristic_memory is not None
+            and nudged_accuracy is not None
+            and non_nudged_accuracy is not None
+        ):
+            heuristic_memory.update_norm_target(nudged_accuracy - non_nudged_accuracy)
+
         if plotter is not None:
             plotter.update(
                 stats["seen"],
@@ -483,6 +502,7 @@ def main() -> None:
                 "retrieved_neighbor_id": log_info.get("retrieved_neighbor_id"),
                 "retrieval_similarity_score": log_info.get("retrieval_similarity_score"),
                 "nudge_probability": log_info.get("nudge_probability"),
+                "nudge_probability_threshold": log_info.get("nudge_probability_threshold"),
                 "nudge_applied": log_info.get("nudge_applied"),
                 "nudge_scale": log_info.get("nudge_scale"),
                 "nudge_scale_floor": log_info.get("nudge_scale_floor"),
@@ -492,6 +512,8 @@ def main() -> None:
                 "nudge_loss": log_info.get("nudge_loss"),
                 "memory_candidate_added": log_info.get("memory_candidate_added"),
                 "memory_index_size": log_info.get("memory_index_size"),
+                "retrieval_threshold": log_info.get("retrieval_threshold"),
+                "retrieval_index": log_info.get("retrieval_index"),
             },
             extra_metrics={
                 "raw_completion": raw_completion,

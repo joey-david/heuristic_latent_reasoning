@@ -15,6 +15,7 @@ The module exposes three key classes:
 from __future__ import annotations
 
 import pickle
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -126,6 +127,7 @@ class NudgingNet(nn.Module):
 class RetrievedHeuristic:
     """Container for objects returned after a successful FAISS lookup."""
 
+    index: int
     similarity: float
     key_proj: Tensor
     value_proj: Tensor
@@ -168,9 +170,53 @@ class HeuristicMemory:
         self.metadata_path = Path(config["metadata_path"])
         self.warmup_min_entries = int(config.get("warmup_min_entries", 64))
         self.duplicate_threshold = float(config.get("duplicate_threshold", 0.98))
+        self.novelty_threshold = config.get("novelty_threshold", None)
+        self.novelty_threshold = (
+            float(self.novelty_threshold)
+            if self.novelty_threshold not in (None, "None")
+            else None
+        )
         self.nudge_min_prob = float(config.get("nudge_min_prob", 0.6))
         self.nudge_scale_min = float(config.get("nudge_scale_min", 0.05))
+        self.nudge_target_norm = float(config.get("nudge_target_norm", 1.9))
+        self.nudge_target_norm_min = float(config.get("nudge_target_norm_min", 1.6))
+        self.nudge_target_norm_max = float(config.get("nudge_target_norm_max", 2.1))
+        self.nudge_trust_region_width = max(
+            0.0, float(config.get("nudge_trust_region_width", 0.15))
+        )
+        self.nudge_trust_region_enabled = bool(
+            config.get("nudge_trust_region_enabled", True)
+        )
+        self.nudge_target_step = max(0.0, float(config.get("nudge_target_step", 0.05)))
+        self.nudge_advantage_beta = float(config.get("nudge_advantage_beta", 0.1))
+        self.nudge_advantage_threshold = float(
+            config.get("nudge_advantage_threshold", 0.02)
+        )
+        self._advantage_ema: Optional[float] = None
+        self.nudge_target_apply_rate = config.get("nudge_target_apply_rate", None)
+        if self.nudge_target_apply_rate in (None, "None"):
+            self.nudge_target_apply_rate = None
+        else:
+            self.nudge_target_apply_rate = float(self.nudge_target_apply_rate)
+            if not 0.0 < self.nudge_target_apply_rate < 1.0:
+                self.nudge_target_apply_rate = None
+        self.nudge_prob_window = max(1, int(config.get("nudge_prob_window", 256)))
+        self.nudge_prob_min_count = max(1, int(config.get("nudge_prob_min_count", 32)))
+        self._prob_history: Optional[deque[float]] = (
+            deque(maxlen=self.nudge_prob_window)
+            if self.nudge_target_apply_rate is not None
+            else None
+        )
+        self._current_prob_threshold = float(self.nudge_min_prob)
         self.add_correct_only = bool(config.get("add_correct_only", True))
+        self.max_entries = int(config.get("max_entries", 0))
+        if self.max_entries < 0:
+            self.max_entries = 0
+        self.prune_metric = str(config.get("prune_metric", "utility")).lower()
+        self.memory_utility_beta = float(config.get("memory_utility_beta", 0.2))
+        self.memory_utility_beta = min(max(self.memory_utility_beta, 0.0), 1.0)
+        self.memory_utility_floor = float(config.get("memory_utility_floor", -1.0))
+        self.memory_utility_ceiling = float(config.get("memory_utility_ceiling", 1.0))
 
         # FAISS index (cosine similarity via inner product on L2-normalised vectors).
         self.index: Optional[faiss.IndexFlatIP] = None
@@ -213,6 +259,36 @@ class HeuristicMemory:
         if threshold <= 0.0:
             threshold = 0.88
         self.retrieval_threshold = threshold
+        self.dynamic_retrieval_threshold = bool(
+            config.get("dynamic_retrieval_threshold", False)
+        )
+        self.retrieval_target_success = float(
+            config.get("retrieval_target_success", 0.4)
+        )
+        self.retrieval_target_success = min(
+            max(self.retrieval_target_success, 0.0), 1.0
+        )
+        self.retrieval_threshold_window = max(
+            1, int(config.get("retrieval_threshold_window", 512))
+        )
+        self.retrieval_threshold_min_count = max(
+            1, int(config.get("retrieval_threshold_min_count", 64))
+        )
+        self.retrieval_threshold_min = float(config.get("retrieval_threshold_min", 0.8))
+        self.retrieval_threshold_max = float(config.get("retrieval_threshold_max", 0.99))
+        if self.retrieval_threshold_min > self.retrieval_threshold_max:
+            self.retrieval_threshold_min, self.retrieval_threshold_max = (
+                self.retrieval_threshold_max,
+                self.retrieval_threshold_min,
+            )
+        self._similarity_history: Optional[deque[float]] = (
+            deque(maxlen=self.retrieval_threshold_window)
+            if self.dynamic_retrieval_threshold
+            else None
+        )
+        self._current_retrieval_threshold = float(self.retrieval_threshold)
+
+        self._access_counter = 0
 
         self.load_index()
         self.load_nudge_net()
@@ -284,22 +360,34 @@ class HeuristicMemory:
         key_proj = self.key_projector(k0.unsqueeze(0)).squeeze(0).detach()
         value_proj = self.value_projector(kn.unsqueeze(0)).squeeze(0).detach()
 
+        best_sim: Optional[float] = None
         if self.index.ntotal > 0:
             query = F.normalize(key_proj.unsqueeze(0), dim=-1).cpu().numpy()
             similarities, _ = self.index.search(query, 1)
-            if similarities.size > 0 and similarities[0][0] >= self.duplicate_threshold:
-                return
+            if similarities.size > 0:
+                best_sim = float(similarities[0][0])
+                if best_sim >= self.duplicate_threshold:
+                    return
+                if self.novelty_threshold is not None and best_sim >= self.novelty_threshold:
+                    return
 
         self._add_to_index(key_proj.unsqueeze(0))
+        self._access_counter += 1
+        extra_meta = dict(metadata) if metadata else {}
         self.metadata.append(
             {
                 "key_proj": key_proj.detach().cpu(),
                 "value_proj": value_proj.detach().cpu(),
-                "extra": metadata or {},
+                "extra": extra_meta,
                 "raw_k0": k0.detach().cpu(),
                 "raw_kn": kn.detach().cpu(),
+                "usage_count": 0,
+                "last_used_step": self._access_counter,
+                "added_step": self._access_counter,
+                "utility": float(extra_meta.get("utility", 0.0)),
             }
         )
+        self._maybe_prune_index()
 
     # Online retrieval
 
@@ -327,16 +415,23 @@ class HeuristicMemory:
         )
 
         sim_score = float(similarities[0][0])
-        if sim_score < self.retrieval_threshold or indices[0][0] < 0:
+        threshold = self._get_retrieval_threshold()
+        self._record_similarity(sim_score)
+        if sim_score < threshold or indices[0][0] < 0:
             return None
 
-        meta = self.metadata[indices[0][0]]
+        meta_idx = int(indices[0][0])
+        meta = self.metadata[meta_idx]
+        self._access_counter += 1
+        meta["last_used_step"] = self._access_counter
+        meta["usage_count"] = int(meta.get("usage_count", 0)) + 1
         retrieved_key = F.normalize(meta["key_proj"], dim=-1)
         retrieved_value = meta["value_proj"]
         raw_k0 = meta.get("raw_k0")
         raw_kn = meta.get("raw_kn")
 
         return RetrievedHeuristic(
+            index=meta_idx,
             similarity=sim_score,
             key_proj=retrieved_key.to(self.device),
             value_proj=retrieved_value.to(self.device),
@@ -367,12 +462,15 @@ class HeuristicMemory:
                 "retrieval_similarity_score": None,
                 "retrieved_neighbor_id": None,
                 "nudge_probability": None,
+                "nudge_probability_threshold": float(self._current_prob_threshold),
                 "nudge_applied": False,
                 "nudge_scale": None,
                 "nudge_scale_floor": float(self.nudge_scale_min),
                 "nudge_norm_pre_gate": None,
                 "nudge_norm_post_scale": None,
-                "nudge_norm_returned": None,
+                "nudge_norm_returned": 0.0,
+                "retrieval_threshold": float(self._current_retrieval_threshold),
+                "retrieval_index": None,
             }, None
 
         observed_proj = self.key_projector(observed_k0.unsqueeze(0))
@@ -393,10 +491,17 @@ class HeuristicMemory:
         scaled_nudge = raw_nudge * scale
         scaled_norm = scaled_nudge.detach().norm().item()
 
-        apply_nudge = prob >= self.nudge_min_prob
-        inference_nudge = scaled_nudge.detach().cpu()
+        prob_threshold = self._get_prob_threshold()
+        apply_nudge = prob >= prob_threshold
+        self._record_prob(prob)
+
+        trust_nudge = self._apply_trust_region(scaled_nudge)
+        trust_norm = trust_nudge.detach().norm().item()
+
+        inference_nudge = trust_nudge.detach().cpu()
         if not apply_nudge:
             inference_nudge = torch.zeros_like(inference_nudge)
+            trust_norm = 0.0
 
         log_info = {
             "retrieval_success": True,
@@ -405,11 +510,15 @@ class HeuristicMemory:
             if retrieval.extra
             else None,
             "nudge_probability": prob,
+            "nudge_probability_threshold": prob_threshold,
             "nudge_applied": apply_nudge,
             "nudge_scale": scale,
             "nudge_scale_floor": scale_floor,
             "nudge_norm_pre_gate": raw_norm,
             "nudge_norm_post_scale": scaled_norm,
+            "nudge_norm_returned": trust_norm,
+            "retrieval_threshold": float(self._current_retrieval_threshold),
+            "retrieval_index": retrieval.index,
         }
         return inference_nudge, log_info, retrieval
 
@@ -437,6 +546,60 @@ class HeuristicMemory:
         self.optimizer.step()
         prob = torch.sigmoid(logit.detach()).item()
         return loss.item(), prob
+
+    def update_feedback(self, index: int, *, helpful: Optional[bool]) -> None:
+        """
+        Updates the stored utility score for a retrieved heuristic.
+
+        Args:
+            index: Index of the heuristic inside the metadata list.
+            helpful: ``True`` if the nudge improved the outcome, ``False`` if it hurt,
+                and ``None`` if the effect is neutral (e.g. gate skipped).
+        """
+        if index is None or index < 0 or index >= len(self.metadata):
+            return
+
+        entry = self.metadata[index]
+        current = float(entry.get("utility", 0.0))
+        beta = self.memory_utility_beta
+        if helpful is None:
+            updated = (1.0 - beta) * current
+        else:
+            reward = 1.0 if helpful else -1.0
+            updated = (1.0 - beta) * current + beta * reward
+        updated = max(self.memory_utility_floor, min(self.memory_utility_ceiling, updated))
+        entry["utility"] = updated
+
+    def update_norm_target(self, advantage: Optional[float]) -> None:
+        """
+        Anneals the trust-region target norm based on observed nudge advantage.
+
+        Args:
+            advantage: Difference in accuracy between nudged and non-nudged buckets.
+        """
+        if advantage is None:
+            return
+
+        beta = self.nudge_advantage_beta
+        if not 0.0 < beta <= 1.0:
+            beta = 0.1
+
+        if self._advantage_ema is None:
+            self._advantage_ema = float(advantage)
+        else:
+            self._advantage_ema = (1.0 - beta) * self._advantage_ema + beta * float(advantage)
+
+        threshold = abs(self.nudge_advantage_threshold)
+        if self._advantage_ema > threshold:
+            self.nudge_target_norm = min(
+                self.nudge_target_norm + self.nudge_target_step,
+                self.nudge_target_norm_max,
+            )
+        elif self._advantage_ema < -threshold:
+            self.nudge_target_norm = max(
+                self.nudge_target_norm - self.nudge_target_step,
+                self.nudge_target_norm_min,
+            )
 
     def eval_step(
         self,
@@ -516,3 +679,133 @@ class HeuristicMemory:
         keys = projected_keys.float().detach()
         keys = F.normalize(keys, dim=-1)
         self.index.add(keys.cpu().numpy())
+
+    def _maybe_prune_index(self) -> None:
+        """Keeps the index within the configured capacity."""
+        if (
+            self.max_entries <= 0
+            or self.index is None
+            or self.index.ntotal <= self.max_entries
+        ):
+            return
+
+        removal_idx = self._select_removal_index()
+        if removal_idx is None:
+            return
+
+        del self.metadata[removal_idx]
+        self._rebuild_index_from_metadata()
+
+    def _select_removal_index(self) -> Optional[int]:
+        """Selects which metadata entry to evict under capacity pressure."""
+        if not self.metadata:
+            return None
+
+        candidates = list(range(len(self.metadata)))
+
+        if self.prune_metric == "utility":
+            utilities = [float(self.metadata[i].get("utility", 0.0)) for i in candidates]
+            min_utility = min(utilities)
+            candidates = [
+                idx for idx in candidates if float(self.metadata[idx].get("utility", 0.0)) == min_utility
+            ]
+
+        last_used = [int(self.metadata[i].get("last_used_step", 0)) for i in candidates]
+        min_last_used = min(last_used)
+        candidates = [
+            idx
+            for idx in candidates
+            if int(self.metadata[idx].get("last_used_step", 0)) == min_last_used
+        ]
+
+        added_steps = [int(self.metadata[i].get("added_step", 0)) for i in candidates]
+        min_added = min(added_steps)
+        for idx in candidates:
+            if int(self.metadata[idx].get("added_step", 0)) == min_added:
+                return idx
+        return candidates[0] if candidates else None
+
+    def _rebuild_index_from_metadata(self) -> None:
+        """Reconstructs the FAISS index from in-memory metadata."""
+        key_dim = None
+        if self.index is not None:
+            key_dim = self.index.d
+        elif self.metadata:
+            key_dim = int(self.metadata[0]["key_proj"].shape[-1])
+        if key_dim is None:
+            return
+
+        self._init_index(key_dim)
+        if not self.metadata:
+            return
+
+        keys = torch.stack([entry["key_proj"] for entry in self.metadata])
+        self._add_to_index(keys)
+
+    def _record_similarity(self, similarity: float) -> None:
+        """Stores similarity observations for dynamic thresholding."""
+        if self._similarity_history is not None:
+            self._similarity_history.append(float(similarity))
+
+    def _get_retrieval_threshold(self) -> float:
+        """Returns the current retrieval threshold, optionally using a quantile gate."""
+        threshold = float(self.retrieval_threshold)
+        if (
+            self.dynamic_retrieval_threshold
+            and self._similarity_history is not None
+            and len(self._similarity_history) >= self.retrieval_threshold_min_count
+        ):
+            quantile = 1.0 - self.retrieval_target_success
+            quantile = min(max(quantile, 0.0), 1.0)
+            history_tensor = torch.tensor(
+                list(self._similarity_history), dtype=torch.float32
+            )
+            dynamic_threshold = float(torch.quantile(history_tensor, quantile).item())
+            dynamic_threshold = max(self.retrieval_threshold_min, dynamic_threshold)
+            dynamic_threshold = min(self.retrieval_threshold_max, dynamic_threshold)
+            threshold = dynamic_threshold
+        self._current_retrieval_threshold = threshold
+        return threshold
+
+    def _record_prob(self, prob: float) -> None:
+        """Stores classifier probabilities for quantile-based gating."""
+        if self._prob_history is not None:
+            self._prob_history.append(float(prob))
+
+    def _get_prob_threshold(self) -> float:
+        """Returns the current probability threshold for applying a nudge."""
+        threshold = float(self.nudge_min_prob)
+        if (
+            self._prob_history is not None
+            and self.nudge_target_apply_rate is not None
+            and len(self._prob_history) >= self.nudge_prob_min_count
+        ):
+            quantile = 1.0 - self.nudge_target_apply_rate
+            quantile = min(max(quantile, 0.0), 1.0)
+            history_tensor = torch.tensor(
+                list(self._prob_history), dtype=torch.float32
+            )
+            dynamic_threshold = float(torch.quantile(history_tensor, quantile).item())
+            threshold = max(threshold, dynamic_threshold)
+        self._current_prob_threshold = threshold
+        return threshold
+
+    def _apply_trust_region(self, nudge_vec: Tensor) -> Tensor:
+        """Clamps the returned nudge norm to the configured trust region."""
+        if not self.nudge_trust_region_enabled:
+            return nudge_vec
+
+        norm = float(nudge_vec.norm().item())
+        if norm == 0.0:
+            return nudge_vec
+
+        target = float(self.nudge_target_norm)
+        target = min(max(target, self.nudge_target_norm_min), self.nudge_target_norm_max)
+        lower = max(0.0, target - self.nudge_trust_region_width)
+        upper = target + self.nudge_trust_region_width
+        desired_norm = min(upper, max(lower, norm))
+        if abs(desired_norm - norm) < 1e-6:
+            return nudge_vec
+
+        scale = desired_norm / norm
+        return nudge_vec * scale
