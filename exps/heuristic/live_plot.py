@@ -12,6 +12,7 @@ class LivePlot:
         *,
         save_path: Optional[Union[str, Path]] = None,
         interactive: bool = True,
+        save_every: int = 1,
     ) -> None:
         self.interactive = interactive
 
@@ -87,6 +88,12 @@ class LivePlot:
             self.save_path.parent.mkdir(parents=True, exist_ok=True)
         else:
             self.save_path = None
+
+        self.save_every: Optional[int] = None
+        if save_every is None:
+            self.save_every = 1 if self.save_path is not None else None
+        elif save_every > 0:
+            self.save_every = int(save_every)
 
     def _refresh_legends(self) -> None:
         perf_handles = [self.acc_line, self.loss_line]
@@ -169,5 +176,6 @@ class LivePlot:
             self.fig.canvas.flush_events()
             plt.pause(0.01)
 
-        if self.save_path is not None:
-            self.fig.savefig(self.save_path, bbox_inches="tight")
+        if self.save_path is not None and self.save_every is not None:
+            if len(self.perf_steps) % self.save_every == 0:
+                self.fig.savefig(self.save_path, bbox_inches="tight")

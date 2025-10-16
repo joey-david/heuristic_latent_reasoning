@@ -161,8 +161,13 @@ def main() -> None:
     live_plot = bool(config.get("live_plot", True))
     live_plot_path = config.get("live_plot_path")
     if live_plot_path in (None, "None"):
-        live_plot_path = None
+        default_plot_dir = Path("plots")
+        run_label = (run_id or "heuristic_run").replace(" ", "_")
+        live_plot_path = default_plot_dir / f"{run_label}.png"
     live_plot_interactive = bool(config.get("live_plot_interactive", True))
+    live_plot_save_every = int(config.get("live_plot_save_every", 10))
+    if live_plot_save_every <= 0:
+        live_plot_save_every = 10
     baseline_accuracy = float(config.get("baseline_accuracy", 0.341))
 
     model_checkpoint = config.get("model_checkpoint")
@@ -209,6 +214,7 @@ def main() -> None:
             baseline=baseline_accuracy,
             save_path=live_plot_path,
             interactive=live_plot_interactive,
+            save_every=live_plot_save_every,
         )
         if live_plot
         else None
