@@ -20,21 +20,30 @@ class LivePlot:
             plt.ion()
         else:
             plt.ioff()
-        self.fig, (self.ax_perf, self.ax_memory) = plt.subplots(
-            2, 1, sharex=True, figsize=(8, 9)
+        self.fig, (self.ax_perf, self.ax_memory, self.ax_nudge) = plt.subplots(
+            3, 1, sharex=True, figsize=(8, 11)
         )
         self.ax_perf.set_title(title)
-        self.ax_memory.set_xlabel("examples")
         self.ax_perf.set_ylabel("accuracy (%)")
         self.ax_memory.set_ylabel("counts")
+        self.ax_nudge.set_ylabel("nudge norm")
+        self.ax_nudge.set_xlabel("examples")
 
         self.ax_loss = self.ax_perf.twinx()
         self.ax_loss.set_ylabel("avg loss")
         self.ax_success = self.ax_memory.twinx()
         self.ax_success.set_ylabel("rates (%)")
+        self.ax_nudge_scale = self.ax_nudge.twinx()
+        self.ax_nudge_scale.set_ylabel("scale / prob")
 
         (self.acc_line,) = self.ax_perf.plot(
             [], [], label="accuracy (%)", color="#1f77b4"
+        )
+        (self.nudged_acc_line,) = self.ax_perf.plot(
+            [], [], label="nudged acc (%)", color="#bcbd22", linestyle="--"
+        )
+        (self.non_nudged_acc_line,) = self.ax_perf.plot(
+            [], [], label="non-nudged acc (%)", color="#ff9896", linestyle=":"
         )
         (self.loss_line,) = self.ax_loss.plot(
             [], [], label="avg loss", color="#ff7f0e"
@@ -54,9 +63,25 @@ class LivePlot:
         (self.guidance_line,) = self.ax_success.plot(
             [], [], label="guided accuracy (%)", color="#8c564b"
         )
+        (self.applied_line,) = self.ax_success.plot(
+            [], [], label="nudge applied (%)", color="#7f7f7f", linestyle="--"
+        )
+        (self.nudge_norm_line,) = self.ax_nudge.plot(
+            [], [], label="mean nudge norm", color="#17becf"
+        )
+        (self.nudge_scale_line,) = self.ax_nudge_scale.plot(
+            [], [], label="mean nudge scale", color="#d62728", linestyle="--"
+        )
+        (self.nudge_prob_line,) = self.ax_nudge_scale.plot(
+            [], [], label="mean nudge prob", color="#8c564b", linestyle=":"
+        )
 
         self.perf_steps: list[int] = []
         self.acc_vals: list[float] = []
+        self.nudged_acc_steps: list[int] = []
+        self.nudged_acc_vals: list[float] = []
+        self.non_nudged_acc_steps: list[int] = []
+        self.non_nudged_acc_vals: list[float] = []
         self.loss_steps: list[int] = []
         self.loss_vals: list[float] = []
         self.memory_steps: list[int] = []
@@ -69,6 +94,14 @@ class LivePlot:
         self.freq_vals: list[float] = []
         self.guidance_steps: list[int] = []
         self.guidance_vals: list[float] = []
+        self.applied_steps: list[int] = []
+        self.applied_vals: list[float] = []
+        self.nudge_norm_steps: list[int] = []
+        self.nudge_norm_vals: list[float] = []
+        self.nudge_scale_steps: list[int] = []
+        self.nudge_scale_vals: list[float] = []
+        self.nudge_prob_steps: list[int] = []
+        self.nudge_prob_vals: list[float] = []
 
         self.baseline = baseline
         self.baseline_line = None
@@ -96,7 +129,7 @@ class LivePlot:
             self.save_every = int(save_every)
 
     def _refresh_legends(self) -> None:
-        perf_handles = [self.acc_line, self.loss_line]
+        perf_handles = [self.acc_line, self.nudged_acc_line, self.non_nudged_acc_line, self.loss_line]
         if self.baseline_line is not None:
             perf_handles.append(self.baseline_line)
         self.ax_perf.legend(
@@ -108,11 +141,22 @@ class LivePlot:
             self.success_line,
             self.freq_line,
             self.guidance_line,
+            self.applied_line,
         ]
         self.ax_memory.legend(
             memory_handles,
             [handle.get_label() for handle in memory_handles],
             loc="upper left",
+        )
+        nudge_handles = [
+            self.nudge_norm_line,
+            self.nudge_scale_line,
+            self.nudge_prob_line,
+        ]
+        self.ax_nudge.legend(
+            nudge_handles,
+            [handle.get_label() for handle in nudge_handles],
+            loc="upper right",
         )
 
     def update(
@@ -126,10 +170,28 @@ class LivePlot:
         retrieval_attempts: int | None = None,
         retrieval_frequency: float | None = None,
         retrieval_guidance_success: float | None = None,
+        nudge_norm_mean: float | None = None,
+        nudge_scale_mean: float | None = None,
+        nudge_prob_mean: float | None = None,
+        nudge_applied_rate: float | None = None,
+        nudged_accuracy: float | None = None,
+        non_nudged_accuracy: float | None = None,
     ) -> None:
         self.perf_steps.append(step)
         self.acc_vals.append(accuracy * 100.0)
         self.acc_line.set_data(self.perf_steps, self.acc_vals)
+
+        if nudged_accuracy is not None:
+            self.nudged_acc_steps.append(step)
+            self.nudged_acc_vals.append(nudged_accuracy * 100.0)
+        self.nudged_acc_line.set_data(self.nudged_acc_steps, self.nudged_acc_vals)
+
+        if non_nudged_accuracy is not None:
+            self.non_nudged_acc_steps.append(step)
+            self.non_nudged_acc_vals.append(non_nudged_accuracy * 100.0)
+        self.non_nudged_acc_line.set_data(
+            self.non_nudged_acc_steps, self.non_nudged_acc_vals
+        )
 
         if avg_loss is not None:
             self.loss_steps.append(step)
@@ -161,6 +223,26 @@ class LivePlot:
             self.guidance_vals.append(retrieval_guidance_success * 100.0)
         self.guidance_line.set_data(self.guidance_steps, self.guidance_vals)
 
+        if nudge_applied_rate is not None:
+            self.applied_steps.append(step)
+            self.applied_vals.append(nudge_applied_rate * 100.0)
+        self.applied_line.set_data(self.applied_steps, self.applied_vals)
+
+        if nudge_norm_mean is not None:
+            self.nudge_norm_steps.append(step)
+            self.nudge_norm_vals.append(nudge_norm_mean)
+        self.nudge_norm_line.set_data(self.nudge_norm_steps, self.nudge_norm_vals)
+
+        if nudge_scale_mean is not None:
+            self.nudge_scale_steps.append(step)
+            self.nudge_scale_vals.append(nudge_scale_mean)
+        self.nudge_scale_line.set_data(self.nudge_scale_steps, self.nudge_scale_vals)
+
+        if nudge_prob_mean is not None:
+            self.nudge_prob_steps.append(step)
+            self.nudge_prob_vals.append(nudge_prob_mean)
+        self.nudge_prob_line.set_data(self.nudge_prob_steps, self.nudge_prob_vals)
+
         self.ax_perf.relim()
         self.ax_perf.autoscale_view()
         self.ax_loss.relim()
@@ -169,6 +251,10 @@ class LivePlot:
         self.ax_memory.autoscale_view()
         self.ax_success.relim()
         self.ax_success.autoscale_view()
+        self.ax_nudge.relim()
+        self.ax_nudge.autoscale_view()
+        self.ax_nudge_scale.relim()
+        self.ax_nudge_scale.autoscale_view()
 
         self.fig.canvas.draw()
 

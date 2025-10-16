@@ -29,6 +29,8 @@ heuristic_memory:
   add_correct_only: true
   # Require confidence before applying a nudge
   nudge_min_prob: 0.6
+  # Minimum scale applied to nudges (prevents vanishing)
+  nudge_scale_min: 0.05
 
   # NudgingNet Architecture
   # Hidden dimension of the MLP inside the NudgingNet

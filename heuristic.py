@@ -169,6 +169,7 @@ class HeuristicMemory:
         self.warmup_min_entries = int(config.get("warmup_min_entries", 64))
         self.duplicate_threshold = float(config.get("duplicate_threshold", 0.98))
         self.nudge_min_prob = float(config.get("nudge_min_prob", 0.6))
+        self.nudge_scale_min = float(config.get("nudge_scale_min", 0.05))
         self.add_correct_only = bool(config.get("add_correct_only", True))
 
         # FAISS index (cosine similarity via inner product on L2-normalised vectors).
@@ -367,6 +368,11 @@ class HeuristicMemory:
                 "retrieved_neighbor_id": None,
                 "nudge_probability": None,
                 "nudge_applied": False,
+                "nudge_scale": None,
+                "nudge_scale_floor": float(self.nudge_scale_min),
+                "nudge_norm_pre_gate": None,
+                "nudge_norm_post_scale": None,
+                "nudge_norm_returned": None,
             }, None
 
         observed_proj = self.key_projector(observed_k0.unsqueeze(0))
@@ -375,13 +381,22 @@ class HeuristicMemory:
             retrieval.key_proj.unsqueeze(0),
             retrieval.value_proj.unsqueeze(0),
         )
+        raw_nudge = nudge.squeeze(0)
+        raw_norm = raw_nudge.detach().norm().item()
+
         logit = self.nudge_classifier(nudge)
         prob_tensor = torch.sigmoid(logit)
         prob = prob_tensor.item()
+
+        scale_floor = max(0.0, min(1.0, float(self.nudge_scale_min)))
+        scale = scale_floor + (1.0 - scale_floor) * prob
+        scaled_nudge = raw_nudge * scale
+        scaled_norm = scaled_nudge.detach().norm().item()
+
         apply_nudge = prob >= self.nudge_min_prob
-        scaled_nudge = (
-            nudge.squeeze(0) * prob_tensor.squeeze() if apply_nudge else None
-        )
+        inference_nudge = scaled_nudge.detach().cpu()
+        if not apply_nudge:
+            inference_nudge = torch.zeros_like(inference_nudge)
 
         log_info = {
             "retrieval_success": True,
@@ -391,8 +406,12 @@ class HeuristicMemory:
             else None,
             "nudge_probability": prob,
             "nudge_applied": apply_nudge,
+            "nudge_scale": scale,
+            "nudge_scale_floor": scale_floor,
+            "nudge_norm_pre_gate": raw_norm,
+            "nudge_norm_post_scale": scaled_norm,
         }
-        return scaled_nudge, log_info, retrieval
+        return inference_nudge, log_info, retrieval
 
     def compute_logit(
         self, observed_k0: Tensor, retrieved: RetrievedHeuristic

@@ -111,6 +111,11 @@ def generate_with_heuristic(
         "nudge_probability": None,
         "nudge_applied": False,
         "nudge_loss": None,
+        "nudge_scale": None,
+        "nudge_scale_floor": None,
+        "nudge_norm_pre_gate": None,
+        "nudge_norm_post_scale": None,
+        "nudge_norm_returned": None,
     }
 
     if heuristic_memory is not None and latent_tokens > 0:
@@ -141,9 +146,14 @@ def generate_with_heuristic(
 
     observed_k0 = observed_vec.detach().cpu()
 
-    latent_nudge = (
-        None if nudge_vec is None else nudge_vec.unsqueeze(0).to(device)
-    )
+    if nudge_vec is not None:
+        log_info["nudge_norm_returned"] = float(nudge_vec.norm().item())
+    else:
+        log_info["nudge_norm_returned"] = None
+
+    latent_nudge: Optional[torch.Tensor] = None
+    if nudge_vec is not None and log_info.get("nudge_applied", False):
+        latent_nudge = nudge_vec.unsqueeze(0).to(device)
 
     with torch.no_grad():
         output_ids = model.generate(
@@ -254,6 +264,16 @@ def main() -> None:
         "retrieval_successes": 0,
         "retrieval_success_correct": 0,
         "memory_additions": 0,
+        "nudge_applied": 0,
+        "nudge_applied_correct": 0,
+        "nudge_not_applied": 0,
+        "nudge_not_applied_correct": 0,
+        "nudge_norm_sum": 0.0,
+        "nudge_norm_count": 0,
+        "nudge_scale_sum": 0.0,
+        "nudge_scale_count": 0,
+        "nudge_prob_sum": 0.0,
+        "nudge_prob_count": 0,
     }
 
     plotter = (
@@ -296,6 +316,8 @@ def main() -> None:
         output_ids = result["output_ids"]
         log_info = result["log_info"]
 
+        is_correct = compare_answers(predicted, ground_truth)
+
         attempted_retrieval = heuristic_memory is not None and num_latent_thoughts > 0
         if attempted_retrieval:
             stats["retrieval_attempts"] += 1
@@ -305,7 +327,6 @@ def main() -> None:
                     stats["retrieval_success_correct"] += 1
         log_info["retrieval_attempted"] = attempted_retrieval
 
-        is_correct = compare_answers(predicted, ground_truth)
         stats["seen"] += 1
         stats["correct"] += int(is_correct)
         accuracy = stats["correct"] / stats["seen"]
@@ -329,6 +350,29 @@ def main() -> None:
             rolling_loss = stats["loss_sum"] / stats["loss_count"]
         else:
             rolling_loss = None
+
+        nudge_norm_pg = log_info.get("nudge_norm_pre_gate")
+        if nudge_norm_pg is not None:
+            stats["nudge_norm_sum"] += float(nudge_norm_pg)
+            stats["nudge_norm_count"] += 1
+
+        nudge_scale_val = log_info.get("nudge_scale")
+        if nudge_scale_val is not None:
+            stats["nudge_scale_sum"] += float(nudge_scale_val)
+            stats["nudge_scale_count"] += 1
+
+        nudge_prob_val = log_info.get("nudge_probability")
+        if nudge_prob_val is not None:
+            stats["nudge_prob_sum"] += float(nudge_prob_val)
+            stats["nudge_prob_count"] += 1
+
+        nudge_applied = bool(log_info.get("nudge_applied"))
+        if nudge_applied:
+            stats["nudge_applied"] += 1
+            stats["nudge_applied_correct"] += int(is_correct)
+        else:
+            stats["nudge_not_applied"] += 1
+            stats["nudge_not_applied_correct"] += int(is_correct)
 
         should_add = False
         if train_mode and heuristic_memory is not None:
@@ -376,6 +420,36 @@ def main() -> None:
             if stats["retrieval_successes"] > 0
             else None
         )
+        nudge_norm_mean = (
+            stats["nudge_norm_sum"] / stats["nudge_norm_count"]
+            if stats["nudge_norm_count"] > 0
+            else None
+        )
+        nudge_scale_mean = (
+            stats["nudge_scale_sum"] / stats["nudge_scale_count"]
+            if stats["nudge_scale_count"] > 0
+            else None
+        )
+        nudge_prob_mean = (
+            stats["nudge_prob_sum"] / stats["nudge_prob_count"]
+            if stats["nudge_prob_count"] > 0
+            else None
+        )
+        nudge_applied_rate = (
+            stats["nudge_applied"] / stats["retrieval_attempts"]
+            if stats["retrieval_attempts"] > 0
+            else None
+        )
+        nudged_accuracy = (
+            stats["nudge_applied_correct"] / stats["nudge_applied"]
+            if stats["nudge_applied"] > 0
+            else None
+        )
+        non_nudged_accuracy = (
+            stats["nudge_not_applied_correct"] / stats["nudge_not_applied"]
+            if stats["nudge_not_applied"] > 0
+            else None
+        )
 
         if plotter is not None:
             plotter.update(
@@ -387,6 +461,12 @@ def main() -> None:
                 retrieval_attempts=stats["retrieval_attempts"],
                 retrieval_frequency=retrieval_frequency,
                 retrieval_guidance_success=retrieval_guidance_success,
+                nudge_norm_mean=nudge_norm_mean,
+                nudge_scale_mean=nudge_scale_mean,
+                nudge_prob_mean=nudge_prob_mean,
+                nudge_applied_rate=nudge_applied_rate,
+                nudged_accuracy=nudged_accuracy,
+                non_nudged_accuracy=non_nudged_accuracy,
             )
 
         logger.log_inference(
@@ -404,6 +484,11 @@ def main() -> None:
                 "retrieval_similarity_score": log_info.get("retrieval_similarity_score"),
                 "nudge_probability": log_info.get("nudge_probability"),
                 "nudge_applied": log_info.get("nudge_applied"),
+                "nudge_scale": log_info.get("nudge_scale"),
+                "nudge_scale_floor": log_info.get("nudge_scale_floor"),
+                "nudge_norm_pre_gate": log_info.get("nudge_norm_pre_gate"),
+                "nudge_norm_post_scale": log_info.get("nudge_norm_post_scale"),
+                "nudge_norm_returned": log_info.get("nudge_norm_returned"),
                 "nudge_loss": log_info.get("nudge_loss"),
                 "memory_candidate_added": log_info.get("memory_candidate_added"),
                 "memory_index_size": log_info.get("memory_index_size"),
@@ -419,6 +504,12 @@ def main() -> None:
                 "retrieval_successes": stats["retrieval_successes"],
                 "retrieval_frequency": retrieval_frequency,
                 "retrieval_guidance_success": retrieval_guidance_success,
+                "nudge_norm_mean": nudge_norm_mean,
+                "nudge_scale_mean": nudge_scale_mean,
+                "nudge_prob_mean": nudge_prob_mean,
+                "nudge_applied_rate": nudge_applied_rate,
+                "nudged_accuracy": nudged_accuracy,
+                "non_nudged_accuracy": non_nudged_accuracy,
                 "baseline_accuracy": baseline_accuracy,
                 "mode": "train" if train_mode else "test",
                 "memory_additions": stats["memory_additions"],
