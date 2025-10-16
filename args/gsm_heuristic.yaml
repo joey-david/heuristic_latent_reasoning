@@ -24,13 +24,25 @@ heuristic_memory:
   # Minimum entries before enabling retrieval
   warmup_min_entries: 64
   # Skip adding near-duplicates already in memory
-  duplicate_threshold: 0.98
+  duplicate_threshold: 0.99
+  # Require novelty before adding (reject if similarity >= threshold)
+  novelty_threshold: 0.95
   # Only persist heuristics from correct traces
   add_correct_only: true
+  # Keep retrieval success around the target band via a dynamic threshold
+  dynamic_retrieval_threshold: true
+  retrieval_target_success: 0.4
+  retrieval_threshold_min: 0.85
+  retrieval_threshold_max: 0.98
   # Require confidence before applying a nudge
   nudge_min_prob: 0.6
+  # Keep apply-rate near 12% using a quantile gate
+  nudge_target_apply_rate: 0.12
+  nudge_prob_min_count: 64
   # Minimum scale applied to nudges (prevents vanishing)
   nudge_scale_min: 0.05
+  # Cap FAISS entries to encourage turnover
+  max_entries: 128
 
   # NudgingNet Architecture
   # Hidden dimension of the MLP inside the NudgingNet

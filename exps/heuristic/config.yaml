@@ -10,3 +10,4 @@ live_plot: true
 baseline_accuracy: 0.341
 retrieval_threshold: 0.95 # Current intuition - 0.93 same domain, 0.95 same type, 0.98 paraphrase
 heuristic_memory: args/gsm_heuristic.yaml
+memory_max_entries: 128
