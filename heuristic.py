@@ -178,9 +178,15 @@ class HeuristicMemory:
         )
         self.nudge_min_prob = float(config.get("nudge_min_prob", 0.6))
         self.nudge_scale_min = float(config.get("nudge_scale_min", 0.05))
+        self.nudge_scale_min = max(0.0, min(1.0, self.nudge_scale_min))
         self.nudge_target_norm = float(config.get("nudge_target_norm", 1.9))
         self.nudge_target_norm_min = float(config.get("nudge_target_norm_min", 1.6))
         self.nudge_target_norm_max = float(config.get("nudge_target_norm_max", 2.1))
+        self.max_nudge_norm = 1.9
+        self.nudge_target_norm_max = min(self.nudge_target_norm_max, self.max_nudge_norm)
+        self.nudge_target_norm_min = min(self.nudge_target_norm_min, self.nudge_target_norm_max)
+        self.nudge_target_norm = min(self.nudge_target_norm, self.nudge_target_norm_max)
+        self.nudge_target_norm = max(self.nudge_target_norm, self.nudge_target_norm_min)
         self.nudge_trust_region_width = max(
             0.0, float(config.get("nudge_trust_region_width", 0.15))
         )
@@ -233,7 +239,7 @@ class HeuristicMemory:
         )
         self.nudge_classifier = nn.Linear(llm_latent_dim, 1).to(self.device)
         self.bce = nn.BCEWithLogitsLoss()
-        self.nudge_lr = float(config.get("nudge_lr", 1e-3))
+        self.nudge_lr = float(config.get("nudge_lr", 1e-4))
         self.optimizer = optim.Adam(
             list(self.nudging_net.parameters()) + list(self.nudge_classifier.parameters()),
             lr=self.nudge_lr,
@@ -457,21 +463,7 @@ class HeuristicMemory:
         """
         retrieval = self.search(observed_k0)
         if retrieval is None:
-            return None, {
-                "retrieval_success": False,
-                "retrieval_similarity_score": None,
-                "retrieved_neighbor_id": None,
-                "nudge_probability": None,
-                "nudge_probability_threshold": float(self._current_prob_threshold),
-                "nudge_applied": False,
-                "nudge_scale": None,
-                "nudge_scale_floor": float(self.nudge_scale_min),
-                "nudge_norm_pre_gate": None,
-                "nudge_norm_post_scale": None,
-                "nudge_norm_returned": 0.0,
-                "retrieval_threshold": float(self._current_retrieval_threshold),
-                "retrieval_index": None,
-            }, None
+            return None, self._no_retrieval_log(), None
 
         observed_proj = self.key_projector(observed_k0.unsqueeze(0))
         nudge = self.nudging_net(
@@ -482,14 +474,9 @@ class HeuristicMemory:
         raw_nudge = nudge.squeeze(0)
         raw_norm = raw_nudge.detach().norm().item()
 
-        logit = self.nudge_classifier(nudge)
-        prob_tensor = torch.sigmoid(logit)
-        prob = prob_tensor.item()
+        prob = torch.sigmoid(self.nudge_classifier(nudge)).item()
 
-        scale_floor = max(0.0, min(1.0, float(self.nudge_scale_min)))
-        scale = scale_floor + (1.0 - scale_floor) * prob
-        scaled_nudge = raw_nudge * scale
-        scaled_norm = scaled_nudge.detach().norm().item()
+        scaled_nudge, scale, scale_floor, scaled_norm = self._scale_nudge(prob, raw_nudge)
 
         prob_threshold = self._get_prob_threshold()
         apply_nudge = prob >= prob_threshold
@@ -497,18 +484,17 @@ class HeuristicMemory:
 
         trust_nudge = self._apply_trust_region(scaled_nudge)
         trust_norm = trust_nudge.detach().norm().item()
-
-        inference_nudge = trust_nudge.detach().cpu()
+        gated_nudge = trust_nudge if apply_nudge else torch.zeros_like(trust_nudge)
+        inference_nudge = gated_nudge.detach().cpu()
         if not apply_nudge:
-            inference_nudge = torch.zeros_like(inference_nudge)
             trust_norm = 0.0
+
+        extra = retrieval.extra or {}
 
         log_info = {
             "retrieval_success": True,
             "retrieval_similarity_score": retrieval.similarity,
-            "retrieved_neighbor_id": retrieval.extra.get("problem_id")
-            if retrieval.extra
-            else None,
+            "retrieved_neighbor_id": extra.get("problem_id"),
             "nudge_probability": prob,
             "nudge_probability_threshold": prob_threshold,
             "nudge_applied": apply_nudge,
@@ -521,6 +507,32 @@ class HeuristicMemory:
             "retrieval_index": retrieval.index,
         }
         return inference_nudge, log_info, retrieval
+
+    def _no_retrieval_log(self) -> Dict[str, Any]:
+        return {
+            "retrieval_success": False,
+            "retrieval_similarity_score": None,
+            "retrieved_neighbor_id": None,
+            "nudge_probability": None,
+            "nudge_probability_threshold": float(self._current_prob_threshold),
+            "nudge_applied": False,
+            "nudge_scale": None,
+            "nudge_scale_floor": self.nudge_scale_min,
+            "nudge_norm_pre_gate": None,
+            "nudge_norm_post_scale": None,
+            "nudge_norm_returned": 0.0,
+            "retrieval_threshold": float(self._current_retrieval_threshold),
+            "retrieval_index": None,
+        }
+
+    def _scale_nudge(
+        self, prob: float, raw_nudge: Tensor
+    ) -> Tuple[Tensor, float, float, float]:
+        scale_floor = self.nudge_scale_min
+        scale = scale_floor + (1.0 - scale_floor) * prob
+        scaled = raw_nudge * scale
+        scaled_norm = scaled.detach().norm().item()
+        return scaled, scale, scale_floor, scaled_norm
 
     def compute_logit(
         self, observed_k0: Tensor, retrieved: RetrievedHeuristic
@@ -793,7 +805,7 @@ class HeuristicMemory:
     def _apply_trust_region(self, nudge_vec: Tensor) -> Tensor:
         """Clamps the returned nudge norm to the configured trust region."""
         if not self.nudge_trust_region_enabled:
-            return nudge_vec
+            return self._cap_norm(nudge_vec)
 
         norm = float(nudge_vec.norm().item())
         if norm == 0.0:
@@ -801,11 +813,18 @@ class HeuristicMemory:
 
         target = float(self.nudge_target_norm)
         target = min(max(target, self.nudge_target_norm_min), self.nudge_target_norm_max)
-        lower = max(0.0, target - self.nudge_trust_region_width)
-        upper = target + self.nudge_trust_region_width
+        upper = min(target + self.nudge_trust_region_width, self.max_nudge_norm)
+        lower = max(0.0, min(target - self.nudge_trust_region_width, upper))
         desired_norm = min(upper, max(lower, norm))
         if abs(desired_norm - norm) < 1e-6:
-            return nudge_vec
+            return self._cap_norm(nudge_vec)
 
-        scale = desired_norm / norm
-        return nudge_vec * scale
+        scaled = nudge_vec * (desired_norm / norm)
+        return self._cap_norm(scaled)
+
+    def _cap_norm(self, nudge_vec: Tensor) -> Tensor:
+        """Caps the nudge norm at the configured maximum."""
+        norm = float(nudge_vec.norm().item())
+        if norm == 0.0 or norm <= self.max_nudge_norm:
+            return nudge_vec
+        return nudge_vec * (self.max_nudge_norm / norm)
