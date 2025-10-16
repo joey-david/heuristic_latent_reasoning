@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 import torch
+import torch.nn.functional as F
 import yaml
 
 from exps.logger import ExperimentLogger
@@ -104,6 +105,29 @@ def generate_with_heuristic(
 
     if heuristic_memory is not None and latent_tokens > 0:
         nudge_vec, log_info, retrieval = heuristic_memory.get_nudge(observed_vec)
+        if retrieval is not None:
+            with torch.no_grad():
+                observed_proj = heuristic_memory.key_projector(
+                    observed_vec.unsqueeze(0).to(heuristic_memory.device)
+                )
+                observed_proj = F.normalize(observed_proj, dim=-1)
+                retrieved_proj = F.normalize(
+                    retrieval.key_proj.unsqueeze(0), dim=-1
+                )
+                cosine = F.cosine_similarity(observed_proj, retrieved_proj, dim=-1).item()
+            retrieved_question = None
+            if retrieval.extra:
+                retrieved_question = (
+                    retrieval.extra.get("question")
+                    or retrieval.extra.get("prompt")
+                    or retrieval.extra.get("input")
+                )
+            print(
+                "[heuristic][retrieval] "
+                f"cosine={cosine:.4f} "
+                f"retrieved_question={retrieved_question or '<unknown>'} "
+                f"current_question={question}"
+            )
 
     observed_k0 = observed_vec.detach().cpu()
 
@@ -308,7 +332,11 @@ def main() -> None:
             heuristic_memory.add(
                 observed_k0,
                 final_latent,
-                metadata={"problem_id": problem_id, "is_correct": bool(is_correct)},
+                metadata={
+                    "problem_id": problem_id,
+                    "is_correct": bool(is_correct),
+                    "question": question,
+                },
             )
             stats["memory_additions"] += 1
         log_info["memory_candidate_added"] = should_add
