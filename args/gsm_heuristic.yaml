@@ -6,9 +6,9 @@ defaults:
 # Heuristic Memory Configuration
 heuristic_memory:
   # Paths
-  faiss_index_path: "data/checkpoints/gsm/faiss/index.ip"
-  metadata_path: "data/checkpoints/gsm/faiss/meta.pkl"
-  nudge_weights_path: "data/checkpoints/gsm/faiss/nudge.pt"
+  faiss_index_path: "data/checkpoints/gsm/faiss_v3/index.ip"
+  metadata_path: "data/checkpoints/gsm/faiss_v3/meta.pkl"
+  nudge_weights_path: "data/checkpoints/gsm/faiss_v3/nudge.pt"
 
   # Dimensionality
   # Dimension of the key stored in FAISS (after projection)
@@ -18,9 +18,17 @@ heuristic_memory:
 
   # Retrieval Control
   # Cosine similarity threshold for applying a nudge. If below, no nudge is used.
-  retrieval_threshold: 0.6
+  retrieval_threshold: 0.88
   # Number of neighbors to retrieve
   k_neighbors: 1
+  # Minimum entries before enabling retrieval
+  warmup_min_entries: 64
+  # Skip adding near-duplicates already in memory
+  duplicate_threshold: 0.98
+  # Only persist heuristics from correct traces
+  add_correct_only: true
+  # Require confidence before applying a nudge
+  nudge_min_prob: 0.6
 
   # NudgingNet Architecture
   # Hidden dimension of the MLP inside the NudgingNet

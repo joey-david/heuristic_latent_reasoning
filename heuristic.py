@@ -166,6 +166,10 @@ class HeuristicMemory:
 
         self.faiss_index_path = Path(config["faiss_index_path"])
         self.metadata_path = Path(config["metadata_path"])
+        self.warmup_min_entries = int(config.get("warmup_min_entries", 64))
+        self.duplicate_threshold = float(config.get("duplicate_threshold", 0.98))
+        self.nudge_min_prob = float(config.get("nudge_min_prob", 0.6))
+        self.add_correct_only = bool(config.get("add_correct_only", True))
 
         # FAISS index (cosine similarity via inner product on L2-normalised vectors).
         self.index: Optional[faiss.IndexFlatIP] = None
@@ -196,12 +200,18 @@ class HeuristicMemory:
         )
 
         self.k_neighbors = int(config.get("k_neighbors", 1))
-        threshold = config.get("retrieval_threshold", config.get("cosine_similarity_threshold"))
+        threshold = config.get("retrieval_threshold")
         if threshold in (None, "None"):
-            raise KeyError(
-                "HeuristicMemory configuration requires a `retrieval_threshold` value."
-            )
-        self.retrieval_threshold = float(threshold)
+            threshold = config.get("cosine_similarity_threshold")
+        if threshold in (None, "None"):
+            threshold = 0.88
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError):
+            threshold = 0.88
+        if threshold <= 0.0:
+            threshold = 0.88
+        self.retrieval_threshold = threshold
 
         self.load_index()
         self.load_nudge_net()
@@ -262,11 +272,22 @@ class HeuristicMemory:
         if self.index is None:
             raise RuntimeError("FAISS index has not been initialised.")
 
+        if self.add_correct_only:
+            is_correct = bool(metadata and metadata.get("is_correct"))
+            if not is_correct:
+                return
+
         k0 = k0.to(self.device)
         kn = kn.to(self.device)
 
         key_proj = self.key_projector(k0.unsqueeze(0)).squeeze(0).detach()
         value_proj = self.value_projector(kn.unsqueeze(0)).squeeze(0).detach()
+
+        if self.index.ntotal > 0:
+            query = F.normalize(key_proj.unsqueeze(0), dim=-1).cpu().numpy()
+            similarities, _ = self.index.search(query, 1)
+            if similarities.size > 0 and similarities[0][0] >= self.duplicate_threshold:
+                return
 
         self._add_to_index(key_proj.unsqueeze(0))
         self.metadata.append(
@@ -293,7 +314,7 @@ class HeuristicMemory:
             :class:`RetrievedHeuristic` if a suitable candidate was found, otherwise
             ``None``.
         """
-        if self.index is None or self.index.ntotal == 0:
+        if self.index is None or self.index.ntotal < self.warmup_min_entries:
             return None
 
         observed_k0 = observed_k0.to(self.device)
@@ -355,8 +376,12 @@ class HeuristicMemory:
             retrieval.value_proj.unsqueeze(0),
         )
         logit = self.nudge_classifier(nudge)
-        prob = torch.sigmoid(logit).item()
-        scaled_nudge = nudge.squeeze(0) * torch.sigmoid(logit).squeeze()
+        prob_tensor = torch.sigmoid(logit)
+        prob = prob_tensor.item()
+        apply_nudge = prob >= self.nudge_min_prob
+        scaled_nudge = (
+            nudge.squeeze(0) * prob_tensor.squeeze() if apply_nudge else None
+        )
 
         log_info = {
             "retrieval_success": True,
@@ -365,7 +390,7 @@ class HeuristicMemory:
             if retrieval.extra
             else None,
             "nudge_probability": prob,
-            "nudge_applied": True,
+            "nudge_applied": apply_nudge,
         }
         return scaled_nudge, log_info, retrieval
 
