@@ -196,7 +196,12 @@ class HeuristicMemory:
         )
 
         self.k_neighbors = int(config.get("k_neighbors", 1))
-        self.retrieval_threshold = float(config.get("retrieval_threshold", 0.0))
+        threshold = config.get("retrieval_threshold", config.get("cosine_similarity_threshold"))
+        if threshold in (None, "None"):
+            raise KeyError(
+                "HeuristicMemory configuration requires a `retrieval_threshold` value."
+            )
+        self.retrieval_threshold = float(threshold)
 
         self.load_index()
         self.load_nudge_net()

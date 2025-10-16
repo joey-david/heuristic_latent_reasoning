@@ -217,6 +217,8 @@ class Coconut(nn.Module):
 
         tokens = input_ids[0].detach().tolist()
         latent_nudge = kwargs.pop("latent_nudge", None)
+        retrieval_similarity = kwargs.pop("retrieval_similarity", None)
+        retrieval_threshold = kwargs.pop("retrieval_threshold", None)
 
         labels = input_ids.clone()  # placeholder. not used.
         outputs = self.forward(
@@ -228,7 +230,14 @@ class Coconut(nn.Module):
             ).reshape(1, -1),
         )
         inputs_embeds = outputs.inputs_embeds
-        if latent_nudge is not None:
+        apply_nudge = latent_nudge is not None
+        if (
+            apply_nudge
+            and retrieval_similarity is not None
+            and retrieval_threshold is not None
+        ):
+            apply_nudge = retrieval_similarity >= retrieval_threshold
+        if apply_nudge:
             inputs_embeds[:, -1, :] += latent_nudge.to(inputs_embeds.device)
 
         # get the first token using the current hidden state

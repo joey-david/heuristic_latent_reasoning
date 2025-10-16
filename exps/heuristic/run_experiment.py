@@ -189,6 +189,12 @@ def main() -> None:
         heuristic_memory_cfg = load_config(resolve_path(heuristic_memory_cfg))
     if isinstance(heuristic_memory_cfg, dict) and "heuristic_memory" in heuristic_memory_cfg:
         heuristic_memory_cfg = heuristic_memory_cfg["heuristic_memory"]
+    if not isinstance(heuristic_memory_cfg, dict):
+        raise ValueError("heuristic_memory configuration must be a mapping.")
+    heuristic_memory_cfg = dict(heuristic_memory_cfg)
+    threshold_override = config.get("retrieval_threshold")
+    if threshold_override not in (None, "None"):
+        heuristic_memory_cfg["retrieval_threshold"] = float(threshold_override)
     heuristic_memory = HeuristicMemory(heuristic_memory_cfg)
 
     memory_warmup = max(0, int(config.get("memory_warmup", 75)))
