@@ -58,14 +58,24 @@ def encode_question(tokenizer, question: str, latent_tokens: int, device: torch.
     return {k: v.to(device) for k, v in encoded.items()}
 
 
-def first_hidden(model, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+def k0_hidden(model, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     with torch.no_grad():
         outputs = model.base_causallm(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-    return outputs.hidden_states[-1][0, 0, :].detach()
+    hidden = outputs.hidden_states[-1]
+    token_ids = input_ids[0]
+    start_latent_id = getattr(model, "start_latent_id", None)
+    latent_positions = None
+    if start_latent_id is not None:
+        latent_positions = (token_ids == start_latent_id).nonzero(as_tuple=False)
+    if latent_positions is not None and latent_positions.numel() > 0:
+        idx = int(latent_positions[0])
+    else:
+        idx = int(attention_mask[0].sum().item() - 1)
+    return hidden[0, idx, :].detach()
 
 
 def final_hidden(model, token_ids: torch.Tensor) -> torch.Tensor:
@@ -91,7 +101,7 @@ def generate_with_heuristic(
     latent_tokens = max(0, int(num_latent_thoughts))
     inputs = encode_question(tokenizer, question, latent_tokens, device)
 
-    observed_vec = first_hidden(model, inputs["input_ids"], inputs["attention_mask"])
+    observed_vec = k0_hidden(model, inputs["input_ids"], inputs["attention_mask"])
     retrieval: Optional[RetrievedHeuristic] = None
     nudge_vec: Optional[torch.Tensor] = None
     log_info: Dict[str, Any] = {
@@ -141,6 +151,14 @@ def generate_with_heuristic(
             attention_mask=inputs["attention_mask"],
             max_new_tokens=max_new_tokens,
             latent_nudge=latent_nudge,
+            retrieval_similarity=(
+                retrieval.similarity if retrieval is not None else None
+            ),
+            retrieval_threshold=(
+                heuristic_memory.retrieval_threshold
+                if heuristic_memory is not None and retrieval is not None
+                else None
+            ),
         )
 
     output_ids = output_ids.to(device)
