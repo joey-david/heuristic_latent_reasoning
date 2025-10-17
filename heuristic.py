@@ -176,10 +176,10 @@ class HeuristicMemory:
             if self.novelty_threshold not in (None, "None")
             else None
         )
-        self.nudge_min_prob = float(config.get("nudge_min_prob", 0.6))
+        self.nudge_min_prob = float(config.get("nudge_min_prob", 0.5))
         self.nudge_scale_min = float(config.get("nudge_scale_min", 0.05))
         self.nudge_scale_min = max(0.0, min(1.0, self.nudge_scale_min))
-        self.nudge_target_norm = float(config.get("nudge_target_norm", 1.9))
+        self.nudge_target_norm = float(config.get("nudge_target_norm", 1.8))
         self.nudge_target_norm_min = float(config.get("nudge_target_norm_min", 1.6))
         self.nudge_target_norm_max = float(config.get("nudge_target_norm_max", 2.1))
         self.max_nudge_norm = 1.9
