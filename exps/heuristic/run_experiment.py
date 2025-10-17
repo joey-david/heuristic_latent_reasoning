@@ -247,9 +247,22 @@ def main() -> None:
     if not isinstance(heuristic_memory_cfg, dict):
         raise ValueError("heuristic_memory configuration must be a mapping.")
     heuristic_memory_cfg = dict(heuristic_memory_cfg)
-    threshold_override = config.get("retrieval_threshold")
-    if threshold_override not in (None, "None"):
-        heuristic_memory_cfg["retrieval_threshold"] = float(threshold_override)
+    override_map = {
+        "retrieval_threshold": ("retrieval_threshold", float),
+        "nudge_min_prob": ("nudge_min_prob", float),
+        "nudge_lr": ("nudge_lr", float),
+        "memory_max_entries": ("max_entries", int),
+        "nudge_inactivity_penalty": ("nudge_inactivity_penalty", float),
+        "nudge_inactivity_floor": ("nudge_inactivity_floor", float),
+    }
+    for top_key, (nested_key, caster) in override_map.items():
+        value = config.get(top_key)
+        if value in (None, "None"):
+            continue
+        try:
+            heuristic_memory_cfg[nested_key] = caster(value)
+        except (TypeError, ValueError):
+            continue
     heuristic_memory = HeuristicMemory(heuristic_memory_cfg)
 
     memory_warmup = max(0, int(config.get("memory_warmup", 75)))

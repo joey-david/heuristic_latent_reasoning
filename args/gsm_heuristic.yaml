@@ -1,14 +1,53 @@
-dataset: data/gsm_train.json
-model_checkpoint: data/checkpoints/gsm/gsm-coconut
-run_id: gsm8k-heuristic-train_128_0.95_0.5_3e-4
-max_examples: null
-max_new_tokens: 128
-num_latent_thoughts: 8
-dry_run: false
-train_mode: true
-live_plot: true
-heuristic_memory: args/gsm_heuristic.yaml
-memory_max_entries: 128
-retrieval_threshold: 0.95 # Current intuition - 0.93 same domain, 0.95 same type, 0.98 paraphrase
-nudge_min_prob: 0.5
-nudge_lr: 3e-4
+# args/gsm_heuristic.yaml
+# Inherit from the base coconut config
+defaults:
+  - gsm_coconut
+
+# Heuristic Memory Configuration
+heuristic_memory:
+  # Paths
+  faiss_index_path: "data/checkpoints/gsm/faiss_v3/index.ip"
+  metadata_path: "data/checkpoints/gsm/faiss_v3/meta.pkl"
+  nudge_weights_path: "data/checkpoints/gsm/faiss_v3/nudge.pt"
+
+  # Dimensionality
+  # Dimension of the key stored in FAISS (after projection)
+  key_dim: 64
+  # Dimension of the value stored alongside the key (after projection)
+  value_dim: 128
+
+  # Retrieval Control
+  # Cosine similarity threshold for applying a nudge. If below, no nudge is used.
+  retrieval_threshold: 0.92
+  # Number of neighbors to retrieve
+  k_neighbors: 1
+  # Minimum entries before enabling retrieval
+  warmup_min_entries: 64
+  # Skip adding near-duplicates already in memory
+  duplicate_threshold: 0.99
+  # Require novelty before adding (reject if similarity >= threshold)
+  novelty_threshold: 0.95
+  # Only persist heuristics from correct traces
+  add_correct_only: true
+  # Keep retrieval success around the target band via a dynamic threshold
+  dynamic_retrieval_threshold: true
+  retrieval_target_success: 0.4
+  retrieval_threshold_min: 0.85
+  retrieval_threshold_max: 0.99
+  # Require confidence before applying a nudge
+  nudge_min_prob: 0.5
+  # Keep apply-rate near 12% using a quantile gate
+  nudge_target_apply_rate: 0.12
+  nudge_prob_min_count: 64
+  # Minimum scale applied to nudges (prevents vanishing)
+  nudge_scale_min: 0.05
+  # Cap FAISS entries to encourage turnover
+  max_entries: 128
+
+  # NudgingNet Architecture
+  # Hidden dimension of the MLP inside the NudgingNet
+  nudge_net_hidden_dim: 256
+  # The final output dimension must match the LLM's latent dimension (e.g., 768 for gpt2-small)
+  llm_latent_dim: 768
+  # Optimisation for the online nudge learner
+  nudge_lr: 0.0003
