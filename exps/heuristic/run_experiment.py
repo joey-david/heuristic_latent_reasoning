@@ -254,6 +254,9 @@ def main() -> None:
         "memory_max_entries": ("max_entries", int),
         "nudge_inactivity_penalty": ("nudge_inactivity_penalty", float),
         "nudge_inactivity_floor": ("nudge_inactivity_floor", float),
+        "faiss_index_path": ("faiss_index_path", str),
+        "metadata_path": ("metadata_path", str),
+        "nudge_weights_path": ("nudge_weights_path", str),
     }
     for top_key, (nested_key, caster) in override_map.items():
         value = config.get(top_key)

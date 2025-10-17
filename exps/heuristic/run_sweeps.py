@@ -17,7 +17,7 @@ BASE_CONFIG: Dict[str, object] = {
     "dataset": "data/gsm_train.json",
     "model_checkpoint": "data/checkpoints/gsm/gsm-coconut",
     "model_id": "openai-community/gpt2",
-    "max_examples": 15000,
+    "max_examples": 5000,
     "max_new_tokens": 128,
     "num_latent_thoughts": 8,
     "dry_run": False,
@@ -60,7 +60,11 @@ def _prepare_config(run_id: str, overrides: Dict[str, float | int]) -> Path:
     config["run_id"] = run_id
     run_dir = PLOTS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    config["live_plot_path"] = str(Path("plots") / "heuristic" / run_id / "plot.png")
+    relative_run_dir = Path("plots") / "heuristic" / run_id
+    config["live_plot_path"] = str(relative_run_dir / "plot.png")
+    config["faiss_index_path"] = str(relative_run_dir / "index.faiss")
+    config["metadata_path"] = str(relative_run_dir / "meta.pkl")
+    config["nudge_weights_path"] = str(relative_run_dir / "nudge.pt")
 
     config_path = run_dir / "config.yaml"
     with config_path.open("w", encoding="utf-8") as handle:
