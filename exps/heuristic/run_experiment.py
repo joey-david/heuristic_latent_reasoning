@@ -24,6 +24,7 @@ from exps.heuristic.live_plot import LivePlot
 
 
 DEFAULT_CONFIG = Path(__file__).with_name("config.yaml")
+ROLLING_WINDOW = 100
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -278,7 +279,10 @@ def main() -> None:
         "nudge_prob_sum": 0.0,
         "nudge_prob_count": 0,
     }
-    recent_nudge_norms: deque[float] = deque(maxlen=5)
+    rolling_nudge_norms: deque[float] = deque(maxlen=ROLLING_WINDOW)
+    rolling_nudge_applied: deque[float] = deque(maxlen=ROLLING_WINDOW)
+    rolling_retrieval_success: deque[float] = deque(maxlen=ROLLING_WINDOW)
+    rolling_retrieval_attempts: deque[float] = deque(maxlen=ROLLING_WINDOW)
 
     plotter = (
         LivePlot(
@@ -329,6 +333,7 @@ def main() -> None:
                 if is_correct:
                     stats["retrieval_success_correct"] += 1
         log_info["retrieval_attempted"] = attempted_retrieval
+        rolling_retrieval_attempts.append(1.0 if attempted_retrieval else 0.0)
 
         stats["seen"] += 1
         stats["correct"] += int(is_correct)
@@ -359,7 +364,8 @@ def main() -> None:
             norm_val = float(nudge_norm_returned)
             stats["nudge_norm_sum"] += norm_val
             stats["nudge_norm_count"] += 1
-            recent_nudge_norms.append(norm_val)
+        norm_for_window = float(nudge_norm_returned) if nudge_norm_returned is not None else 0.0
+        rolling_nudge_norms.append(norm_for_window)
 
         nudge_scale_val = log_info.get("nudge_scale")
         if nudge_scale_val is not None:
@@ -378,6 +384,10 @@ def main() -> None:
         else:
             stats["nudge_not_applied"] += 1
             stats["nudge_not_applied_correct"] += int(is_correct)
+        rolling_nudge_applied.append(1.0 if nudge_applied else 0.0)
+        rolling_retrieval_success.append(
+            1.0 if bool(log_info.get("retrieval_success")) else 0.0
+        )
 
         retrieval_index = log_info.get("retrieval_index")
         if heuristic_memory is not None and retrieval_index is not None:
@@ -421,9 +431,11 @@ def main() -> None:
             heuristic_memory.index.ntotal if heuristic_memory.index is not None else 0
         )
         log_info["memory_index_size"] = faiss_index_size
+        window_full = len(rolling_retrieval_attempts) == ROLLING_WINDOW
+        attempts_window = sum(rolling_retrieval_attempts) if window_full else 0.0
         retrieval_success_rate = (
-            stats["retrieval_successes"] / stats["retrieval_attempts"]
-            if stats["retrieval_attempts"] > 0
+            sum(rolling_retrieval_success) / attempts_window
+            if window_full and attempts_window > 0.0
             else None
         )
         retrieval_frequency = (
@@ -440,8 +452,8 @@ def main() -> None:
             else None
         )
         nudge_norm_recent_mean = (
-            sum(recent_nudge_norms) / len(recent_nudge_norms)
-            if recent_nudge_norms
+            sum(rolling_nudge_norms) / ROLLING_WINDOW
+            if len(rolling_nudge_norms) == ROLLING_WINDOW
             else None
         )
         nudge_scale_mean = (
@@ -455,8 +467,8 @@ def main() -> None:
             else None
         )
         nudge_applied_rate = (
-            stats["nudge_applied"] / stats["retrieval_attempts"]
-            if stats["retrieval_attempts"] > 0
+            sum(rolling_nudge_applied) / attempts_window
+            if window_full and attempts_window > 0.0
             else None
         )
         nudged_accuracy = (
@@ -526,16 +538,16 @@ def main() -> None:
                 "training_problems_processed": stats["seen"],
                 "rolling_accuracy": accuracy,
                 "rolling_loss": rolling_loss,
-                "retrieval_success_rate": retrieval_success_rate,
+                "retrieval_success_rate_last100": retrieval_success_rate,
                 "retrieval_attempts": stats["retrieval_attempts"],
                 "retrieval_successes": stats["retrieval_successes"],
                 "retrieval_frequency": retrieval_frequency,
                 "retrieval_guidance_success": retrieval_guidance_success,
                 "nudge_norm_mean": nudge_norm_global_mean,
-                "nudge_norm_mean_last5": nudge_norm_recent_mean,
+                "nudge_norm_mean_last100": nudge_norm_recent_mean,
                 "nudge_scale_mean": nudge_scale_mean,
                 "nudge_prob_mean": nudge_prob_mean,
-                "nudge_applied_rate": nudge_applied_rate,
+                "nudge_applied_rate_last100": nudge_applied_rate,
                 "nudged_accuracy": nudged_accuracy,
                 "non_nudged_accuracy": non_nudged_accuracy,
                 "mode": "train" if train_mode else "test",

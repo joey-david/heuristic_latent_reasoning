@@ -93,16 +93,16 @@ class LivePlot:
             [], [], label="faiss entries", color="#2ca02c"
         )
         (self.success_line,) = self.ax_success.plot(
-            [], [], label="retrieval success (%)", color="#d62728"
+            [], [], label="retrieval success (% last200)", color="#d62728"
         )
         (self.guidance_line,) = self.ax_success.plot(
             [], [], label="guided accuracy (%)", color="#8c564b"
         )
         (self.applied_line,) = self.ax_success.plot(
-            [], [], label="nudge applied (%)", color="#7f7f7f", linestyle="--"
+            [], [], label="nudge applied (% last200)", color="#7f7f7f", linestyle="--"
         )
         (self.nudge_norm_line,) = self.ax_nudge.plot(
-            [], [], label="mean nudge norm (last5)", color="#17becf"
+            [], [], label="mean nudge norm (last200)", color="#17becf"
         )
         (self.nudge_scale_line,) = self.ax_nudge_scale.plot(
             [], [], label="mean nudge scale", color="#d62728", linestyle="--"
@@ -297,10 +297,10 @@ class LivePlot:
                     "non_nudged_accuracy_pct": self.non_nudged_acc_vals[-1] if self.non_nudged_acc_vals else None,
                     "avg_loss": self.loss_vals[-1] if self.loss_vals else None,
                     "faiss_entries": self.entry_vals[-1] if self.entry_vals else None,
-                    "retrieval_success_pct": self.success_vals[-1] if self.success_vals else None,
+                    "retrieval_success_pct_last200": self.success_vals[-1] if self.success_vals else None,
                     "guided_accuracy_pct": self.guidance_vals[-1] if self.guidance_vals else None,
-                    "nudge_applied_pct": self.applied_vals[-1] if self.applied_vals else None,
-                    "nudge_norm_last5": self.nudge_norm_vals[-1] if self.nudge_norm_vals else None,
+                    "nudge_applied_pct_last200": self.applied_vals[-1] if self.applied_vals else None,
+                    "nudge_norm_last200": self.nudge_norm_vals[-1] if self.nudge_norm_vals else None,
                     "nudge_scale_mean": self.nudge_scale_vals[-1] if self.nudge_scale_vals else None,
                     "nudge_prob_mean": self.nudge_prob_vals[-1] if self.nudge_prob_vals else None,
                 }

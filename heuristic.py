@@ -208,12 +208,6 @@ class HeuristicMemory:
                 self.nudge_target_apply_rate = None
         self.nudge_prob_window = max(1, int(config.get("nudge_prob_window", 256)))
         self.nudge_prob_min_count = max(1, int(config.get("nudge_prob_min_count", 32)))
-        self._prob_history: Optional[deque[float]] = (
-            deque(maxlen=self.nudge_prob_window)
-            if self.nudge_target_apply_rate is not None
-            else None
-        )
-        self._current_prob_threshold = float(self.nudge_min_prob)
         self.add_correct_only = bool(config.get("add_correct_only", True))
         self.max_entries = int(config.get("max_entries", 0))
         if self.max_entries < 0:
@@ -237,13 +231,8 @@ class HeuristicMemory:
         self.nudging_net = NudgingNet(key_dim, value_dim, hidden_dim, llm_latent_dim).to(
             self.device
         )
-        self.nudge_classifier = nn.Linear(llm_latent_dim, 1).to(self.device)
-        self.bce = nn.BCEWithLogitsLoss()
         self.nudge_lr = float(config.get("nudge_lr", 1e-4))
-        self.optimizer = optim.Adam(
-            list(self.nudging_net.parameters()) + list(self.nudge_classifier.parameters()),
-            lr=self.nudge_lr,
-        )
+        self.optimizer = optim.Adam(self.nudging_net.parameters(), lr=self.nudge_lr)
         default_nudge_weights = self.faiss_index_path.parent / "nudge_weights.pt"
         self.nudge_weights_path = Path(
             config.get(
@@ -474,13 +463,12 @@ class HeuristicMemory:
         raw_nudge = nudge.squeeze(0)
         raw_norm = raw_nudge.detach().norm().item()
 
-        prob = torch.sigmoid(self.nudge_classifier(nudge)).item()
+        prob = 1.0
 
         scaled_nudge, scale, scale_floor, scaled_norm = self._scale_nudge(prob, raw_nudge)
 
-        prob_threshold = self._get_prob_threshold()
-        apply_nudge = prob >= prob_threshold
-        self._record_prob(prob)
+        prob_threshold = None
+        apply_nudge = True
 
         trust_nudge = self._apply_trust_region(scaled_nudge)
         trust_norm = trust_nudge.detach().norm().item()
@@ -514,7 +502,7 @@ class HeuristicMemory:
             "retrieval_similarity_score": None,
             "retrieved_neighbor_id": None,
             "nudge_probability": None,
-            "nudge_probability_threshold": float(self._current_prob_threshold),
+            "nudge_probability_threshold": None,
             "nudge_applied": False,
             "nudge_scale": None,
             "nudge_scale_floor": self.nudge_scale_min,
@@ -534,30 +522,11 @@ class HeuristicMemory:
         scaled_norm = scaled.detach().norm().item()
         return scaled, scale, scale_floor, scaled_norm
 
-    def compute_logit(
-        self, observed_k0: Tensor, retrieved: RetrievedHeuristic
-    ) -> Tensor:
-        observed_proj = self.key_projector(observed_k0.unsqueeze(0))
-        nudge = self.nudging_net(
-            observed_proj,
-            retrieved.key_proj.unsqueeze(0),
-            retrieved.value_proj.unsqueeze(0),
-        )
-        logit = self.nudge_classifier(nudge)
-        return logit.view(1)
-
     def train_step(
         self, observed_k0: Tensor, retrieved: RetrievedHeuristic, target: Tensor
     ) -> Tuple[float, float]:
-        self.nudging_net.train()
-        self.nudge_classifier.train()
-        self.optimizer.zero_grad()
-        logit = self.compute_logit(observed_k0, retrieved)
-        loss = self.bce(logit, target.view_as(logit))
-        loss.backward()
-        self.optimizer.step()
-        prob = torch.sigmoid(logit.detach()).item()
-        return loss.item(), prob
+        self.nudging_net.eval()
+        return 0.0, 1.0
 
     def update_feedback(self, index: int, *, helpful: Optional[bool]) -> None:
         """
@@ -620,16 +589,7 @@ class HeuristicMemory:
         target: Optional[Tensor] = None,
     ) -> Tuple[float, Optional[float]]:
         self.nudging_net.eval()
-        self.nudge_classifier.eval()
-        with torch.no_grad():
-            logit = self.compute_logit(observed_k0, retrieved)
-            prob = torch.sigmoid(logit).item()
-            loss = (
-                self.bce(logit, target.view_as(logit)).item()
-                if target is not None
-                else None
-            )
-        return prob, loss
+        return 1.0, None
 
     # Persistence
 
@@ -657,12 +617,10 @@ class HeuristicMemory:
 
     def save_nudge_net(self) -> None:
         self.nudging_net.eval()
-        self.nudge_classifier.eval()
         self.nudge_weights_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
                 "nudging_net": self.nudging_net.state_dict(),
-                "classifier": self.nudge_classifier.state_dict(),
             },
             self.nudge_weights_path,
         )
@@ -674,8 +632,6 @@ class HeuristicMemory:
                 self.nudging_net.load_state_dict(state["nudging_net"])
             else:
                 self.nudging_net.load_state_dict(state)
-            if "classifier" in state:
-                self.nudge_classifier.load_state_dict(state["classifier"])
 
     # Internal helpers
 
@@ -777,29 +733,6 @@ class HeuristicMemory:
             dynamic_threshold = min(self.retrieval_threshold_max, dynamic_threshold)
             threshold = dynamic_threshold
         self._current_retrieval_threshold = threshold
-        return threshold
-
-    def _record_prob(self, prob: float) -> None:
-        """Stores classifier probabilities for quantile-based gating."""
-        if self._prob_history is not None:
-            self._prob_history.append(float(prob))
-
-    def _get_prob_threshold(self) -> float:
-        """Returns the current probability threshold for applying a nudge."""
-        threshold = float(self.nudge_min_prob)
-        if (
-            self._prob_history is not None
-            and self.nudge_target_apply_rate is not None
-            and len(self._prob_history) >= self.nudge_prob_min_count
-        ):
-            quantile = 1.0 - self.nudge_target_apply_rate
-            quantile = min(max(quantile, 0.0), 1.0)
-            history_tensor = torch.tensor(
-                list(self._prob_history), dtype=torch.float32
-            )
-            dynamic_threshold = float(torch.quantile(history_tensor, quantile).item())
-            threshold = max(threshold, dynamic_threshold)
-        self._current_prob_threshold = threshold
         return threshold
 
     def _apply_trust_region(self, nudge_vec: Tensor) -> Tensor:
