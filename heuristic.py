@@ -182,7 +182,7 @@ class HeuristicMemory:
         self.nudge_target_norm = float(config.get("nudge_target_norm", 1.8))
         self.nudge_target_norm_min = float(config.get("nudge_target_norm_min", 1.6))
         self.nudge_target_norm_max = float(config.get("nudge_target_norm_max", 2.1))
-        self.max_nudge_norm = 1.9
+        self.max_nudge_norm = 2.5
         self.nudge_target_norm_max = min(self.nudge_target_norm_max, self.max_nudge_norm)
         self.nudge_target_norm_min = min(self.nudge_target_norm_min, self.nudge_target_norm_max)
         self.nudge_target_norm = min(self.nudge_target_norm, self.nudge_target_norm_max)
@@ -240,6 +240,12 @@ class HeuristicMemory:
         self.nudge_classifier = nn.Linear(llm_latent_dim, 1).to(self.device)
         self.bce = nn.BCEWithLogitsLoss()
         self.nudge_lr = float(config.get("nudge_lr", 1e-4))
+        self.nudge_inactivity_penalty = max(
+            0.0, float(config.get("nudge_inactivity_penalty", 0.1))
+        )
+        self.nudge_inactivity_floor = max(
+            0.0, float(config.get("nudge_inactivity_floor", 1e-3))
+        )
         self.optimizer = optim.Adam(
             list(self.nudging_net.parameters()) + list(self.nudge_classifier.parameters()),
             lr=self.nudge_lr,
@@ -553,11 +559,14 @@ class HeuristicMemory:
         self.nudge_classifier.train()
         self.optimizer.zero_grad()
         logit = self.compute_logit(observed_k0, retrieved)
-        loss = self.bce(logit, target.view_as(logit))
-        loss.backward()
+        primary_loss = self.bce(logit, target.view_as(logit))
+        total_loss = primary_loss
+        if self.nudge_inactivity_penalty > 0.0:
+            total_loss = total_loss + self.nudge_inactivity_penalty * self._nudging_net_inactivity_loss()
+        total_loss.backward()
         self.optimizer.step()
         prob = torch.sigmoid(logit.detach()).item()
-        return loss.item(), prob
+        return total_loss.item(), prob
 
     def update_feedback(self, index: int, *, helpful: Optional[bool]) -> None:
         """
@@ -828,3 +837,15 @@ class HeuristicMemory:
         if norm == 0.0 or norm <= self.max_nudge_norm:
             return nudge_vec
         return nudge_vec * (self.max_nudge_norm / norm)
+
+    def _nudging_net_inactivity_loss(self) -> Tensor:
+        """Penalises very small nudging-net weights to discourage inactivity."""
+        floor = float(self.nudge_inactivity_floor)
+        penalties: List[Tensor] = []
+        for param in self.nudging_net.parameters():
+            if not param.requires_grad:
+                continue
+            penalties.append(torch.mean(torch.relu(floor - param.abs())))
+        if not penalties:
+            return torch.zeros((), device=self.device)
+        return torch.stack(penalties).mean()
