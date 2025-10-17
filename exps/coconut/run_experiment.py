@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.append(str(ROOT))
+root_str = str(ROOT)
+if root_str in sys.path:
+    sys.path.remove(root_str)
+sys.path.insert(0, root_str)
 
 import torch
 import yaml
