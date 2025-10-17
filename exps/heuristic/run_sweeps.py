@@ -72,6 +72,13 @@ def _prepare_config(run_id: str, overrides: Dict[str, float | int]) -> Path:
     return config_path
 
 
+def _cleanup_run_dir(run_dir: Path) -> None:
+    for name in ("index.faiss", "meta.pkl", "nudge.pt"):
+        path = run_dir / name
+        if path.exists():
+            path.unlink()
+
+
 def _run_experiment(config_path: Path) -> None:
     rel_path = config_path.relative_to(ROOT)
     subprocess.run(
@@ -89,6 +96,7 @@ def main() -> None:
         try:
             _run_experiment(config_path)
         finally:
+            _cleanup_run_dir(config_path.parent)
             print(f"[heuristic-sweep] finished {run_id}")
 
 
