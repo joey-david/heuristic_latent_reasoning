@@ -1,13 +1,14 @@
 dataset: data/gsm_train.json
 model_checkpoint: data/checkpoints/gsm/gsm-coconut
-run_id: gsm8k-heuristic-train
+run_id: gsm8k-heuristic-train_128_0.95_0.5_3e-4
 max_examples: null
 max_new_tokens: 128
 num_latent_thoughts: 8
 dry_run: false
 train_mode: true
 live_plot: true
-baseline_accuracy: 0.341
-retrieval_threshold: 0.95 # Current intuition - 0.93 same domain, 0.95 same type, 0.98 paraphrase
 heuristic_memory: args/gsm_heuristic.yaml
 memory_max_entries: 128
+retrieval_threshold: 0.95 # Current intuition - 0.93 same domain, 0.95 same type, 0.98 paraphrase
+nudge_min_prob: 0.5
+nudge_lr: 3e-4
