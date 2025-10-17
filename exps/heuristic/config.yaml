@@ -10,7 +10,7 @@ train_mode: true
 live_plot: true
 live_plot_interactive: false
 live_plot_save_every: 100
-live_plot_path: plots/heuristic/heuristic_base.png
+live_plot_path: plots/heuristic/heuristic_base/plot.png
 heuristic_memory: args/gsm_heuristic.yaml
 memory_max_entries: 128
 retrieval_threshold: 0.95

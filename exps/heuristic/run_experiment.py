@@ -556,6 +556,9 @@ def main() -> None:
             },
         )
 
+    if plotter is not None:
+        plotter.finalize()
+
     if train_mode:
         heuristic_memory.save_index()
         heuristic_memory.save_nudge_net()

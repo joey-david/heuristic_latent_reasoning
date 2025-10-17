@@ -309,3 +309,10 @@ class LivePlot:
         if self.save_path is not None and self.save_every is not None:
             if len(self.perf_steps) % self.save_every == 0:
                 self.fig.savefig(self.save_path, bbox_inches="tight")
+
+    def finalize(self) -> None:
+        """Persist the latest figure and release pyplot resources."""
+        if self.save_path is not None:
+            self.fig.savefig(self.save_path, bbox_inches="tight")
+        if not self.interactive:
+            plt.close(self.fig)

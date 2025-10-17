@@ -58,10 +58,11 @@ def _prepare_config(run_id: str, overrides: Dict[str, float | int]) -> Path:
     config = deepcopy(BASE_CONFIG)
     config.update(overrides)
     config["run_id"] = run_id
-    config["live_plot_path"] = str(Path("plots") / "heuristic" / f"{run_id}.png")
+    run_dir = PLOTS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    config["live_plot_path"] = str(Path("plots") / "heuristic" / run_id / "plot.png")
 
-    config_path = PLOTS_DIR / f"{run_id}.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path = run_dir / "config.yaml"
     with config_path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(config, handle, sort_keys=False)
     return config_path
