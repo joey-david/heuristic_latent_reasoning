@@ -5,6 +5,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from tqdm import tqdm
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
@@ -307,7 +309,14 @@ def main() -> None:
         else None
     )
 
-    for idx, problem in enumerate(dataset):
+    progress_iter = tqdm(
+        dataset,
+        desc=(run_id or "heuristic_run"),
+        unit="problem",
+        dynamic_ncols=True,
+    )
+
+    for idx, problem in enumerate(progress_iter):
         question = (
             problem.get("question")
             or problem.get("prompt")
