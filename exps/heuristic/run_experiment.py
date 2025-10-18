@@ -270,6 +270,28 @@ def main() -> None:
             continue
     heuristic_memory = HeuristicMemory(heuristic_memory_cfg)
 
+    print(
+        "[heuristic][config] "
+        f"dataset={dataset_path} "
+        f"run_id={run_id} "
+        f"max_examples={len(dataset)} "
+        f"num_latent_thoughts={num_latent_thoughts} "
+        f"max_new_tokens={max_new_tokens}"
+    )
+    print(
+        "[heuristic][config] "
+        f"retrieval_threshold={heuristic_memory.retrieval_threshold} "
+        f"nudge_min_prob={heuristic_memory.nudge_min_prob} "
+        f"nudge_lr={heuristic_memory.nudge_lr} "
+        f"memory_max_entries={heuristic_memory.max_entries}"
+    )
+    print(
+        "[heuristic][config] "
+        f"faiss_index_path={heuristic_memory.faiss_index_path} "
+        f"metadata_path={heuristic_memory.metadata_path} "
+        f"nudge_weights_path={heuristic_memory.nudge_weights_path}"
+    )
+
     memory_warmup = max(0, int(config.get("memory_warmup", 75)))
     memory_stride = max(1, int(config.get("memory_stride", 2)))
     memory_max_entries = max(1, int(config.get("memory_max_entries", 3000)))
