@@ -11,6 +11,7 @@ from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 import yaml
+import matplotlib.pyplot as plt
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,6 +132,8 @@ def main() -> None:
         "retrievals": 0,
         "retrieval_success": 0,
     }
+    loss_track: List[float] = []
+    loss_curve: List[Tuple[int, float]] = []
 
     total = len(dataset)
 
@@ -171,6 +174,10 @@ def main() -> None:
             applied = prob >= memory.gate_threshold
             loss, train_prob = memory.train(observed, match, 1.0 if utility > 0 else 0.0)
             prob = train_prob
+            loss_track.append(loss)
+            if len(loss_track) % 100 == 0:
+                window = loss_track[-100:]
+                loss_curve.append((len(loss_track), sum(window) / len(window)))
             memory.update_utility(match.index, utility)
             if utility > 0:
                 stats["improved"] += 1
@@ -225,6 +232,19 @@ def main() -> None:
         )
 
     memory.save()
+    if loss_curve:
+        xs, ys = zip(*loss_curve)
+        plt.figure(figsize=(6, 4))
+        plt.plot(xs, ys, marker="o")
+        plt.xlabel("Training updates")
+        plt.ylabel("Avg loss (last 100)")
+        plt.title("Nudging Loss")
+        plt.grid(True, linestyle="--", alpha=0.4)
+        plot_dir = Path("plots")
+        plot_dir.mkdir(exist_ok=True)
+        plt.tight_layout()
+        plt.savefig(plot_dir / "nudging_loss.png", dpi=160)
+        plt.close()
 
 
 if __name__ == "__main__":
