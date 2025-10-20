@@ -34,6 +34,16 @@ def load_config(path: Path) -> Dict[str, Any]:
     return yaml.safe_load(path.read_text())
 
 
+def resolve_config_path(base: Path, candidate: str | Path) -> Path:
+    path = Path(candidate)
+    if path.is_absolute():
+        return path
+    local_path = (base.parent / path).resolve()
+    if local_path.exists():
+        return local_path
+    return (ROOT / path).resolve()
+
+
 def load_dataset(path: Path) -> List[Dict[str, Any]]:
     data = json.loads(Path(path).read_text())
     return data["data"] if isinstance(data, dict) and "data" in data else data
@@ -102,7 +112,12 @@ def run_generation(
 
 
 def main() -> None:
-    config = load_config(DEFAULT_CONFIG)
+    config_path = (
+        Path(sys.argv[1]).expanduser().resolve()
+        if len(sys.argv) > 1
+        else DEFAULT_CONFIG.resolve()
+    )
+    config = load_config(config_path)
 
     dataset_path = Path(config["dataset"])
     dataset = load_dataset(dataset_path)
@@ -112,10 +127,17 @@ def main() -> None:
     model_bundle = load_coconut_model(Path(config["model_checkpoint"]), config["model_id"])
     model, tokenizer, device = model_bundle
 
-    memory = HeuristicMemory(config["heuristic_memory"])
+    heuristic_cfg = config.get("heuristic_memory")
+    if heuristic_cfg is None:
+        raise ValueError("Missing `heuristic_memory` in config.")
+    if isinstance(heuristic_cfg, str):
+        heuristic_path = resolve_config_path(config_path, heuristic_cfg)
+        heuristic_cfg = load_config(heuristic_path)
+    memory = HeuristicMemory(heuristic_cfg)
     num_latent = int(config.get("num_latent_thoughts", 0))
     max_new_tokens = int(config.get("max_new_tokens", 128))
     run_id = config.get("run_id")
+    train_mode = bool(config.get("train_mode", True))
 
     logger = ExperimentLogger(
         Path(__file__).resolve().parent / "results.jsonl",
@@ -166,32 +188,40 @@ def main() -> None:
         if match is not None:
             stats["retrievals"] += 1
             similarity = match.similarity
-            nudge_vec, prob = memory.preview_nudge(observed, match)
+            nudge_vec, preview_prob = memory.preview_nudge(observed, match)
             latent_nudge = nudge_vec.unsqueeze(0).to(device)
             nudged = run_generation(model_bundle, encoded, max_new_tokens, latent_nudge=latent_nudge)
             nudged_correct = compare_answers(nudged["predicted"], ground_truth)
             utility = int(nudged_correct) - int(baseline_correct)
-            applied = prob >= memory.gate_threshold
-            loss, train_prob = memory.train(observed, match, 1.0 if utility > 0 else 0.0)
-            prob = train_prob
-            loss_track.append(loss)
-            if len(loss_track) % 100 == 0:
-                window = loss_track[-100:]
-                loss_curve.append((len(loss_track), sum(window) / len(window)))
-            memory.update_utility(match.index, utility)
-            if utility > 0:
-                stats["improved"] += 1
-                nudged_final = final_hidden(model, nudged["output_ids"])
-                memory.add_example(
-                    observed,
-                    nudged_final,
-                    meta={"problem_id": problem_id, "question": question},
-                    utility=float(utility),
-                )
-            elif utility < 0:
-                stats["improved"] += 0  # keeps intent explicit
+            applied = preview_prob >= memory.gate_threshold
+            prob = preview_prob
 
-        if match is None and memory.cfg.add_if_correct and baseline_correct:
+            if train_mode:
+                loss, train_prob = memory.train(observed, match, 1.0 if utility > 0 else 0.0)
+                prob = train_prob
+                loss_track.append(loss)
+                if len(loss_track) % 100 == 0:
+                    window = loss_track[-100:]
+                    loss_curve.append((len(loss_track), sum(window) / len(window)))
+                memory.update_utility(match.index, utility)
+                if utility > 0:
+                    stats["improved"] += 1
+                    nudged_final = final_hidden(model, nudged["output_ids"])
+                    memory.add_example(
+                        observed,
+                        nudged_final,
+                        meta={"problem_id": problem_id, "question": question},
+                        utility=float(utility),
+                    )
+                elif utility < 0:
+                    stats["improved"] += 0  # keeps intent explicit
+
+        if (
+            train_mode
+            and match is None
+            and memory.cfg.add_if_correct
+            and baseline_correct
+        ):
             memory.add_example(
                 observed,
                 baseline_final,
@@ -231,8 +261,9 @@ def main() -> None:
             },
         )
 
-    memory.save()
-    if loss_curve:
+    if train_mode:
+        memory.save()
+    if train_mode and loss_curve:
         xs, ys = zip(*loss_curve)
         plt.figure(figsize=(6, 4))
         plt.plot(xs, ys, marker="o")
