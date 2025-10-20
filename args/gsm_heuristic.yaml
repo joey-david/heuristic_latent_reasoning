@@ -6,9 +6,9 @@ defaults:
 # Heuristic Memory Configuration
 heuristic_memory:
   # Paths
-  faiss_index_path: "data/checkpoints/gsm/faiss_v3/index.ip"
-  metadata_path: "data/checkpoints/gsm/faiss_v3/meta.pkl"
-  nudge_weights_path: "data/checkpoints/gsm/faiss_v3/nudge.pt"
+  faiss_index_path: "data/checkpoints/gsm/faiss_mem128_thr0.95_prob0.0_lr1e-4_max100/index.mem128_rt0.95_max100.ip"
+  metadata_path: "data/checkpoints/gsm/faiss_mem128_thr0.95_prob0.0_lr1e-4_max100/meta.mem128_rt0.95_max100.pkl"
+  nudge_weights_path: "data/checkpoints/gsm/faiss_mem128_thr0.95_prob0.0_lr1e-4_max100/nudge.h256_k64_v128_lr1e-4_max100.pt"
 
   # Dimensionality
   # Dimension of the key stored in FAISS (after projection)
