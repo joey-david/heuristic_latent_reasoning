@@ -8,7 +8,7 @@ num_latent_thoughts: 8
 train_mode: false
 heuristic_memory:
   latent_dim: 768
-  key_dim: 64
+  key_dim: 128
   value_dim: 128
   index_path: data/checkpoints/gsm/faiss_lean/index.faiss
   metadata_path: data/checkpoints/gsm/faiss_lean/metadata.pt
