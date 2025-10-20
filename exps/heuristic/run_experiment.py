@@ -132,7 +132,15 @@ def main() -> None:
         "retrieval_success": 0,
     }
 
-    for problem in tqdm(dataset, desc=run_id or "heuristic", unit="problem", dynamic_ncols=True):
+    total = len(dataset)
+
+    for problem in tqdm(
+        dataset,
+        desc=run_id or "heuristic",
+        unit="problem",
+        dynamic_ncols=True,
+        total=total,
+    ):
         problem_id = str(problem.get("problem_id") or problem.get("id") or stats["seen"])
         question = problem.get("question") or problem.get("prompt") or problem.get("input") or ""
         ground_truth = problem.get("answer")
