@@ -27,7 +27,7 @@ from exps.coconut.run_experiment import (
 )
 
 
-DEFAULT_CONFIG = Path(__file__).with_name("config.yaml")
+DEFAULT_CONFIG = Path(__file__).with_name("config_test.yaml")
 
 
 def load_config(path: Path) -> Dict[str, Any]:
