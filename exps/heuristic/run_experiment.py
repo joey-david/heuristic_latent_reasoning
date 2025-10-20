@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -11,6 +12,11 @@ import torch
 import torch.nn.functional as F
 import yaml
 
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
 from exps.logger import ExperimentLogger
 from heuristic import HeuristicMemory
 from exps.coconut.run_experiment import (
@@ -20,7 +26,6 @@ from exps.coconut.run_experiment import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).with_name("config.yaml")
 
 
