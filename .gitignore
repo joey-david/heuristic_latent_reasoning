@@ -3,5 +3,5 @@
 __pycache__/
 lit/
 data/gsm_*
-data/checkpoints/*
+data/checkpoints/gsm/gsm*
 AGENTS.md
