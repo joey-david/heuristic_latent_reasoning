@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 import yaml
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .config import (
@@ -135,7 +136,14 @@ def extract_latents(runner: ModelRunner, split: DataSplitConfig) -> None:
     """Generates answers and caches latents for a dataset split."""
     records = []
     dataset = _load_dataset(split)
-    for sample in dataset:
+    iterator = tqdm(
+        dataset,
+        desc=f"[kNoT] Extracting latents -> {split.cache}",
+        unit="record",
+        total=len(dataset),
+        leave=False,
+    )
+    for sample in iterator:
         answer, hidden, tokens = runner.generate(sample["question"])
         base_canonical = utils.canonicalize_answer(answer)
         gold_canonical = utils.canonicalize_answer(sample["answer"])
