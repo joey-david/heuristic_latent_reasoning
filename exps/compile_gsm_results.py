@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -34,12 +34,12 @@ def build_report(
     dataset_path: Path,
     cot_path: Path,
     coconut_path: Path,
-    heuristic_path: Path,
+    knot_path: Optional[Path] = None,
 ) -> List[Dict]:
     dataset = load_dataset(dataset_path)
     cot = load_jsonl(cot_path)
     coconut = load_jsonl(coconut_path)
-    heuristic = load_jsonl(heuristic_path)
+    knot = load_jsonl(knot_path) if knot_path and knot_path.exists() else {}
 
     report: List[Dict] = []
     for idx, item in enumerate(dataset):
@@ -57,24 +57,20 @@ def build_report(
 
         cot_correct, cot_tokens = extract(cot, "cot")
         coconut_correct, coconut_tokens = extract(coconut, "coconut")
-        heuristic_correct, heuristic_tokens = extract(heuristic, "heuristic")
+        models = {
+            "cot": {"correct": cot_correct, "tokens": cot_tokens},
+            "coconut": {"correct": coconut_correct, "tokens": coconut_tokens},
+        }
+        if knot:
+            knot_correct, knot_tokens = extract(knot, "knot")
+            models["knot"] = {"correct": knot_correct, "tokens": knot_tokens}
 
         report.append(
             {
                 "problem_id": problem_id,
                 "question": question,
                 "answer": answer,
-                "models": {
-                    "cot": {"correct": cot_correct, "tokens": cot_tokens},
-                    "coconut": {
-                        "correct": coconut_correct,
-                        "tokens": coconut_tokens,
-                    },
-                    "faiss_augmented": {
-                        "correct": heuristic_correct,
-                        "tokens": heuristic_tokens,
-                    },
-                },
+                "models": models,
             }
         )
     return report
@@ -103,10 +99,10 @@ def main() -> None:
         help="JSONL log produced by the coconut baseline.",
     )
     parser.add_argument(
-        "--faiss-log",
+        "--knot-log",
         type=Path,
-        default=Path("exps/heuristic/results.jsonl"),
-        help="JSONL log produced by the FAISS-augmented model.",
+        default=Path("exps/knot/results.jsonl"),
+        help="JSONL log produced by the kNoT retriever.",
     )
     parser.add_argument(
         "--output",
@@ -115,7 +111,7 @@ def main() -> None:
         help="Destination YAML file.",
     )
     args = parser.parse_args()
-    report = build_report(args.dataset, args.cot_log, args.coconut_log, args.faiss_log)
+    report = build_report(args.dataset, args.cot_log, args.coconut_log, args.knot_log)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(report, handle, sort_keys=False)

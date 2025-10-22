@@ -1,4 +1,4 @@
-'''The main augmented LLM model class, augmenting a base LRLLM with heuristic storage and retrieval logic.'''
+'''The core Coconut wrapper that augments a base LRLLM with continuous-thought feedback.'''
 
 import torch
 import torch.nn as nn

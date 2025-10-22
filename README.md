@@ -1,13 +1,19 @@
-# Heuristic Latent Reasoning
+# kNoT: Latent Retrieval for Coconut
 
-This repository explores **latent-space heuristics** for language-model reasoning.  
-We build directly on top of [Coconut](https://arxiv.org/abs/2412.06769) while adding:
+This repository builds on top of [Coconut](https://arxiv.org/abs/2412.06769) and adds a lean
+**k-Nearest Neighbors of Thought (kNoT)** pipeline. The goal is to reuse the final hidden state
+of a single forward pass as a *latent thought*, retrieve nearest neighbours with FAISS, and
+correct answers via non-parametric voting—no extra decoding tokens required.
 
-- a FAISS-backed heuristic memory that nudges the model with retrieved traces,
-- tooling to log retrieval dynamics and aggregate experiment metrics,
-- practical recipes for reproducing baselines and running the new heuristic variants.
+The tree now contains:
 
-![Heuristic Latent Reasoning](assets/coconut.png)
+- the original Coconut training/eval harness (for baseline reproduction),
+- a minimal kNoT toolkit for latent extraction, FAISS indexing, voting, and optional gating,
+- reporting utilities to compare Direct, CoT-1, Coconut, and kNoT at equal token budgets.
+
+![Continuous thoughts](assets/coconut.png)
+
+---
 
 ## Environment Setup
 
@@ -15,22 +21,25 @@ We build directly on top of [Coconut](https://arxiv.org/abs/2412.06769) while ad
 git clone https://github.com/facebookresearch/heuristic_latent_reasoning.git
 cd heuristic_latent_reasoning
 
-conda create -n hlr python=3.12
-conda activate hlr
+conda create -n knot python=3.12
+conda activate knot
 
 pip install -r requirements.txt
 # pick the FAISS build that matches your hardware
 pip install faiss-gpu    # or: pip install faiss-cpu
 ```
 
-Login to [Weights & Biases](https://wandb.ai/site/) before launching experiments:
+Login to [Weights & Biases](https://wandb.ai/site/) if you plan to reuse the original Coconut
+training scripts:
 
 ```bash
 wandb login
 ```
 
-> **Tip:** the repository ships with a `docker/` configuration if you prefer containerized runs.  
-> The compose file mounts Hugging Face and wandb caches so you keep artifacts between sessions.
+The repository ships with a `docker/` configuration if you prefer containerized runs; the compose
+file mounts Hugging Face and wandb caches for persistence between sessions.
+
+---
 
 ## Data Layout
 
@@ -38,7 +47,7 @@ wandb login
 
   ```python
   [
-    {"question": "...", "answer": "...", "steps": ["...", "..."]},
+    {"question": "...", "answer": "..."},
     ...
   ]
   ```
@@ -49,9 +58,11 @@ wandb login
   bash preprocessing/gsm_icot.bash
   ```
 
-## Baseline: Coconut in a Nutshell
+---
 
-The Coconut training loop is unchanged; we simply keep the knobs that matter:
+## Coconut Baselines
+
+The original Coconut training loop is retained verbatim. Typical GSM8K runs:
 
 ```bash
 # Stage 0: supervised CoT warm-up (1 GPU)
@@ -61,55 +72,91 @@ torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_cot.yaml
 torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
 ```
 
-Both configs expect you to update `save_path`, `load_model_path`, and dataset paths before launching.  
-Checkpoint selection and pure evaluation reuse the stock configs from the original Coconut release.
+Both configs expect you to update `save_path`, `load_model_path`, and dataset locations before
+launching. Evaluation-only configs are supplied alongside the originals.
 
-## Heuristic Latent Memory
+---
 
-Our heuristic module (`heuristic.py`) adds a FAISS index, neural projectors, and a nudging network:
+## kNoT Latent Retrieval Pipeline
 
-- Configure it via `args/gsm_heuristic.yaml` (key/value dimensions, thresholds, index paths).
-- Set `heuristic_memory` inside your experiment config to activate retrieval-guided inference.
-- When retrieval is enabled, `run.py` persists `retrieval_metrics_epoch_*.json` next to checkpoints.
-- `exps/heuristic/run_experiment.py` provides a lightweight CLI that logs inference-time heuristics to `exps/heuristic/results.jsonl` for downstream analysis.
+The new pipeline lives under `knot/` and is designed to stay minimal—one JSONL cache per split,
+one FAISS index, and a lightweight voting/gating layer.
 
-Before using heuristic memory, ensure FAISS is installed and that the index directory in your config exists (it will be created on demand).
+### 1. Configure the dataset
 
-## Experiment Playbook
+- Edit `configs/gsm.yaml` (or copy it) to point at your dataset JSON and choose cache/output paths.
+- Adjust the `index` block if you want different `k`, weighting, or base-answer prior.  
+  The file now also records where the serialized FAISS index and metadata will be stored.
 
-Follow this checklist to move from vanilla Coconut to heuristic-augmented runs:
+### 2. Choose pipeline steps
 
-0. **Prepare GSM8K data**
-   ```bash
-   bash preprocessing/gsm_icot.bash
-   ```
+- `configs/runner.yaml` lists the configs to execute and optionally overrides the step list.
+- Default steps are `["extract_train", "extract_eval", "build_index", "evaluate"]`.
+- Available steps:
+  - `extract_train` / `extract_eval`: single-pass generation with hidden-state caching.
+  - `build_index`: builds and saves the FAISS index using the train cache.
+  - `train_gate`: fits the optional logistic override gate (scikit-learn).
+  - `evaluate`: runs latent retrieval on the eval cache and writes metrics/predictions.
 
-1. **Train Coconut without retrieval (paper reproduction)**
-   ```bash
-   torchrun --nnodes 1 --nproc_per_node 4 run.py args/gsm_coconut.yaml
-   ```
+### 3. Run the pipeline (no CLI flags required)
 
-2. **Verify CoT vs. Coconut baselines**
-   ```bash
-   torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_cot.yaml
-   torchrun --nnodes 1 --nproc_per_node 1 run.py args/gsm_coconut_eval.yaml
-   ```
+```bash
+python knot.py
+```
 
-3. **Fit the heuristic memory + nudge net (live plot)**
-   ```bash
-   python exps/heuristic/run_experiment.py exps/heuristic/config.yaml
-   ```
-   `config.yaml` targets the GSM8K training split with `train_mode: true`. The run streams a live plot that overlays rolling accuracy against the 34.1% Coconut baseline while the binary nudge loss averages are updated. Every example both trains the nudging MLP and inserts its latents into the FAISS index; weights and index are persisted under `data/index/` when the pass finishes.
+Each config listed in `configs/runner.yaml` is executed in order. The script only loads the model
+when extraction steps are present, so you can re-run `build_index` / `evaluate` without touching
+weights.
 
-4. **Evaluate with frozen heuristics on GSM8K test**
-   ```bash
-   python exps/heuristic/run_experiment.py exps/heuristic/config_eval.yaml
-   ```
-   `config_eval.yaml` flips `train_mode: false` so the stored nudges stay fixed. The live chart keeps running, letting you inspect accuracy lift against the baseline as retrieval kicks in without mutating the memory.
+Outputs for the default GSM config:
 
-5. **Sweep the cosine similarity threshold for retrieval nudges**
-   - Copy `args/gsm_heuristic.yaml` to a scratch file, adjust `heuristic_memory.retrieval_threshold`, and point the run config's `heuristic_memory` field at that copy.
-   - Execute `python exps/heuristic/run_experiment.py exps/heuristic/config_eval.yaml` for each candidate threshold; compare the live accuracy trace and logged metrics to pick the best cutoff.
+- `outputs/gsm_train_latents.jsonl` / `outputs/gsm_valid_latents.jsonl`: hidden-state caches.
+- `outputs/gsm_train.faiss` (+ `.meta.json`): FAISS index and metadata.
+- `outputs/gsm_metrics.json`: summary metrics (base vs kNoT accuracy, token cost, flip counts).
+- `outputs/gsm_flips.jsonl`: cases where kNoT changed the answer.
+- `outputs/gsm_predictions.jsonl`: full per-example diagnostics (neighbor sims, vote weights, gate features).
+- `outputs/gsm_gate_dataset.jsonl` (optional): feature dump used to fit the logistic gate.
+
+### 4. Toggle the retrieval gate
+
+- Enable the gate via `index.gate.enabled: true`.
+- The gate uses a scikit-learn logistic regression over a handful of features (max/mean similarity,
+  vote weights, neighbour overlap). Threshold is configurable via `index.gate.threshold`.
+- Gate weights are written to `index.gate.state_path` (Joblib archive) for reuse.
+
+### 5. One-command baselines + report
+
+`python scripts/run_gsm_comparison.py` walks through CoT evaluation, Coconut evaluation, kNoT
+pipeline, and final report generation—skipping any step whose output files already exist.
+Double-check the referenced configs before running so they point at your checkpoints/datasets.
+
+---
+
+## Reporting and Plots
+
+`knot_report.py` renders accuracy/tokens tables and quick plots for any set of metric files.
+Edit `configs/report.yaml` to list the runs you want to compare—Direct, CoT-1, Coconut, kNoT, etc.
+
+```bash
+python knot_report.py
+```
+
+For each dataset entry the script writes:
+
+- `plots/<dataset>_summary.csv`: table with accuracy, token cost, and flip counts.
+- `plots/<dataset>_accuracy.png`: bar chart of accuracy (%), with token counts annotated.
+
+The reporting code reads metric JSONs and flip JSONLs directly; it does not require raw logits.
+
+---
+
+## Repository Cleanup
+
+- The older heuristic nudging modules (`heuristic.py`, `exps/heuristic/`) have been removed.
+- FAISS usage now lives solely inside the kNoT retrieval stack.
+- Coconut remains untouched so you can still reproduce the original paper baselines.
+
+---
 
 ## Citation
 
@@ -124,7 +171,4 @@ If you use the Coconut components in academic work, please cite:
 }
 ```
 
-We will release a citation for the heuristic latent reasoning extensions as soon as the manuscript is public.
-
-observed accuracy of cot trained model: 0.404 on 1000 samples
-observed accuracy of coconut trained model: 0.306 on 1000 samples
+A citation for kNoT will follow once the manuscript is public.

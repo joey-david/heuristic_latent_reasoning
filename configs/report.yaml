@@ -1,0 +1,17 @@
+reports:
+  - dataset: gsm8k
+    table_path: plots/gsm8k_summary.csv
+    plot_path: plots/gsm8k_accuracy.png
+    runs:
+      - label: Direct
+        metrics_path: outputs/gsm_direct_metrics.json
+        flips_path: null
+      - label: CoT-1
+        metrics_path: outputs/gsm_cot1_metrics.json
+        flips_path: null
+      - label: Coconut
+        metrics_path: outputs/gsm_coconut_metrics.json
+        flips_path: outputs/gsm_coconut_flips.jsonl
+      - label: kNoT
+        metrics_path: outputs/gsm_metrics.json
+        flips_path: outputs/gsm_flips.jsonl

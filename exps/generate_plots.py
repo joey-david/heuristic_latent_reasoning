@@ -11,7 +11,8 @@ def load_results(model_paths: Dict[str, Path]) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
     for model, path in model_paths.items():
         if not path.exists():
-            raise FileNotFoundError(path)
+            print(f"[plots] skipping missing log for {model}: {path}")
+            continue
 
         records = []
         with path.open("r", encoding="utf-8") as handle:
@@ -26,6 +27,8 @@ def load_results(model_paths: Dict[str, Path]) -> pd.DataFrame:
 
         frames.append(pd.DataFrame.from_records(records))
 
+    if not frames:
+        raise RuntimeError("No result logs were loaded; ensure paths are correct.")
     return pd.concat(frames, ignore_index=True)
 
 
@@ -53,9 +56,9 @@ def accuracy_tokens_table(df: pd.DataFrame, plots_dir: Path) -> None:
 
 
 def accuracy_vs_thoughts(df: pd.DataFrame, plots_dir: Path) -> None:
-    focus = df[df["model_name"].isin(["coconut", "heuristic"])].copy()
+    focus = df[df["model_name"].isin(["coconut", "knot"])].copy()
     if focus.empty:
-        print("No Coconut or heuristic results found; skipping accuracy vs thoughts plot.")
+        print("No Coconut or kNoT results found; skipping accuracy vs thoughts plot.")
         return
 
     plt.figure(figsize=(6, 4))
@@ -101,7 +104,7 @@ def accuracy_vs_thoughts(df: pd.DataFrame, plots_dir: Path) -> None:
 
 def accuracy_vs_inference_time(df: pd.DataFrame, plots_dir: Path) -> None:
     plt.figure(figsize=(6, 4))
-    colors = {"cot": "#1f77b4", "coconut": "#ff7f0e", "heuristic": "#2ca02c"}
+    colors = {"cot": "#1f77b4", "coconut": "#ff7f0e", "knot": "#2ca02c"}
     for model, group in df.groupby("model_name"):
         plt.scatter(
             group["inference_time_ms"],
@@ -121,90 +124,6 @@ def accuracy_vs_inference_time(df: pd.DataFrame, plots_dir: Path) -> None:
     print(f"Saved accuracy vs inference time scatter to {out_path}")
 
 
-def heuristic_dashboard(df: pd.DataFrame, plots_dir: Path) -> None:
-    subset = df[df["model_name"] == "heuristic"].copy()
-    if subset.empty:
-        print("No heuristic results found; skipping dashboard.")
-        return
-
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-    # Panel 1: retrieval similarity distribution
-    similarities = subset["retrieval_similarity_score"].dropna()
-    axes[0].hist(similarities, bins=15, color="#6baed6")
-    axes[0].set_title("Retrieval Similarity")
-    axes[0].set_xlabel("Cosine similarity")
-    axes[0].set_ylabel("Count")
-
-    # Panel 2: nudge impact on accuracy
-    if "nudge_applied" in subset.columns:
-        bars = (
-            subset.dropna(subset=["nudge_applied"])
-            .groupby("nudge_applied")["is_correct"]
-            .mean()
-            .reset_index()
-        )
-        axes[1].bar(
-            bars["nudge_applied"].astype(str),
-            bars["is_correct"] * 100.0,
-            color="#fd8d3c",
-        )
-        axes[1].set_title("Nudge Impact on Accuracy")
-        axes[1].set_ylabel("Accuracy (%)")
-        axes[1].set_xlabel("Nudge applied")
-    else:
-        axes[1].set_visible(False)
-
-    # Panel 3: nudge magnitude vs similarity
-    if "nudge_magnitude" in subset.columns:
-        axes[2].scatter(
-            subset["retrieval_similarity_score"],
-            subset["nudge_magnitude"],
-            s=18,
-            color="#31a354",
-            alpha=0.6,
-        )
-        axes[2].set_title("Nudge Magnitude vs Similarity")
-        axes[2].set_xlabel("Cosine similarity")
-        axes[2].set_ylabel("Nudge magnitude")
-    else:
-        axes[2].set_visible(False)
-
-    fig.tight_layout()
-    out_path = plots_dir / "heuristic_dashboard.png"
-    fig.savefig(out_path, dpi=200)
-    plt.close(fig)
-    print(f"Saved heuristic dashboard to {out_path}")
-
-
-def faiss_growth_plot(df: pd.DataFrame, plots_dir: Path) -> None:
-    subset = df[
-        (df["model_name"] == "heuristic")
-        & df["faiss_index_size"].notnull()
-        & df["training_problems_processed"].notnull()
-    ].copy()
-    if subset.empty:
-        print("No FAISS index metrics found; skipping growth plot.")
-        return
-
-    subset = subset.sort_values("training_problems_processed")
-
-    plt.figure(figsize=(6, 4))
-    plt.plot(
-        subset["training_problems_processed"],
-        subset["faiss_index_size"],
-        marker="o",
-        color="#756bb1",
-    )
-    plt.xlabel("# training problems processed")
-    plt.ylabel("FAISS index size")
-    plt.tight_layout()
-    out_path = plots_dir / "faiss_index_growth.png"
-    plt.savefig(out_path, dpi=200)
-    plt.close()
-    print(f"Saved FAISS index growth plot to {out_path}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate experiment plots by aggregating model result logs."
@@ -220,9 +139,9 @@ def main() -> None:
         default=Path(__file__).resolve().parent / "coconut" / "results.jsonl",
     )
     parser.add_argument(
-        "--heuristic-path",
+        "--knot-path",
         type=Path,
-        default=Path(__file__).resolve().parent / "heuristic" / "results.jsonl",
+        default=Path(__file__).resolve().parent / "knot" / "results.jsonl",
     )
     args = parser.parse_args()
 
@@ -230,7 +149,7 @@ def main() -> None:
         {
             "cot": args.cot_path,
             "coconut": args.coconut_path,
-            "heuristic": args.heuristic_path,
+            "knot": args.knot_path,
         }
     )
 
@@ -238,8 +157,6 @@ def main() -> None:
     accuracy_tokens_table(df, plots_dir)
     accuracy_vs_thoughts(df, plots_dir)
     accuracy_vs_inference_time(df, plots_dir)
-    heuristic_dashboard(df, plots_dir)
-    faiss_growth_plot(df, plots_dir)
 
 
 if __name__ == "__main__":

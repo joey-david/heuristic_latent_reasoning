@@ -28,7 +28,6 @@ class ExperimentLogger:
         num_generated_tokens: int,
         num_latent_thoughts: int,
         inference_time_ms: float,
-        heuristic_metrics: Optional[Dict[str, Any]] = None,
         extra_metrics: Optional[Dict[str, Any]] = None,
     ) -> None:
         entry: Dict[str, Any] = {
@@ -44,8 +43,6 @@ class ExperimentLogger:
             "inference_time_ms": float(inference_time_ms),
         }
 
-        if heuristic_metrics:
-            entry.update(heuristic_metrics)
         if extra_metrics:
             entry.update(extra_metrics)
 
