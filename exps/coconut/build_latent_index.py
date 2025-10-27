@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[2]
 root_str = str(ROOT)
@@ -103,7 +104,9 @@ def main() -> None:
     filter_correct = bool(retrieval_cfg.get("filter_correct", True))
     normalize = bool(retrieval_cfg.get("normalize", True))
 
+    print(f"[builder] Loading Coconut model ({model_id}) and checkpoint: {checkpoint}")
     coconut, tokenizer, device = load_coconut_model(checkpoint, model_id)
+    print("[builder] Model ready; starting cache build")
     model_bundle = (coconut, tokenizer, device)
 
     ensure_directory(out_cache)
@@ -111,7 +114,10 @@ def main() -> None:
     ensure_directory(metadata_path)
 
     kept = 0
-    with out_cache.open("w", encoding="utf-8") as cache_handle:
+    total = len(dataset) if max_examples is None else min(len(dataset), max_examples)
+    with out_cache.open("w", encoding="utf-8") as cache_handle, tqdm(
+        total=total, desc="[builder] Caching Coconut latents", unit="ex"
+    ) as pbar:
         for idx, problem in _iter_dataset(dataset, max_examples):
             question = _resolve_question(problem)
             gold_answer = problem.get("answer") or problem.get("target") or ""
@@ -144,28 +150,30 @@ def main() -> None:
             canonical_base = canonicalize_answer(predicted or "")
             canonical_gold = canonicalize_answer(gold_answer or "")
 
-            if filter_correct and canonical_base != canonical_gold:
-                continue
-
-            record = {
-                "id": idx,
-                "question": question,
-                "gold_answer": gold_answer,
-                "gold_canonical": canonical_gold,
-                "base_answer": predicted,
-                "canonical_base": canonical_base,
-                "hidden_state": final_hidden.tolist(),
-                "tokens": num_tokens,
-            }
-            cache_handle.write(json.dumps(record, ensure_ascii=True))
-            cache_handle.write("\n")
-            kept += 1
+            if not (filter_correct and canonical_base != canonical_gold):
+                record = {
+                    "id": idx,
+                    "question": question,
+                    "gold_answer": gold_answer,
+                    "gold_canonical": canonical_gold,
+                    "base_answer": predicted,
+                    "canonical_base": canonical_base,
+                    "hidden_state": final_hidden.tolist(),
+                    "tokens": num_tokens,
+                }
+                cache_handle.write(json.dumps(record, ensure_ascii=True))
+                cache_handle.write("\n")
+                kept += 1
+            pbar.set_postfix(kept=kept)
+            pbar.update(1)
 
     if kept == 0:
         raise RuntimeError("No latent records written; aborting index build.")
 
+    print("[builder] Building FAISS index from cache")
     index = LatentIndex.from_cache(out_cache, normalize=normalize)
     index.save(index_path, metadata_path)
+    print(f"[builder] Saved index -> {index_path}\n[builder] Saved meta  -> {metadata_path}")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ sys.path.insert(0, root_str)
 import torch
 import yaml
 import numpy as np
+from tqdm import tqdm
 
 from utils import ensure_transformers_no_torchvision
 
@@ -81,7 +82,9 @@ def load_coconut_model(
         eos_token_id=tokenizer.eos_token_id,
     )
 
+    print(f"[coconut] Loading checkpoint: {checkpoint}")
     state_dict = torch.load(checkpoint, map_location="cpu")
+    print("[coconut] Checkpoint loaded; applying state dict")
     coconut.load_state_dict(state_dict, strict=False)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -245,14 +248,18 @@ def main() -> None:
     index: Optional[LatentIndex] = None
     vec_by_id: Dict[int, np.ndarray] = {}
     if not dry_run and retrieval_enabled:
+        print("[coconut] Loading retrieval index and metadata")
         index = LatentIndex.load(
             retrieval_cache,
             retrieval_index_path,
             retrieval_metadata_path,
         )
         vec_by_id = {rec.idx: rec.hidden_state for rec in index.records}
+        print(f"[coconut] Retrieval index ready: k={retrieval_k}, alpha={retrieval_alpha}, threshold={retrieval_threshold}")
 
-    for idx, problem in enumerate(dataset):
+    nudged_total = 0
+    with tqdm(total=len(dataset), desc="[coconut] Evaluating", unit="ex") as pbar:
+        for idx, problem in enumerate(dataset):
         question = (
             problem.get("question")
             or problem.get("prompt")
@@ -368,6 +375,10 @@ def main() -> None:
             inference_time_ms=elapsed_ms,
             extra_metrics=extras,
         )
+        if applied_nudge:
+            nudged_total += 1
+        pbar.set_postfix(nudged=nudged_total)
+        pbar.update(1)
 
 
 if __name__ == "__main__":

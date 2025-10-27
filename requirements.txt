@@ -1,14 +1,23 @@
-torch==2.5.1
+# ============================================================
+# Core stack (Nightly PyTorch build with CUDA 12.6 support)
+# ============================================================
+--index-url https://download.pytorch.org/whl/nightly/cu126
+
+torch==2.6.0.dev20251025          # Nightly build supporting sm_120
+torchvision==0.21.0.dev20251025
+torchaudio==2.6.0.dev20251025
+
 numpy==2.1.3
 transformers==4.46.2
-torchvision==0.20.1
-torchaudio==2.5.1
-wandb==0.18.7
 datasets==3.1.0
-tqdm==4.67.0
-matplotlib==3.9.2
-faiss-cpu
-tqdm
-python-dateutil
 scikit-learn==1.5.2
 joblib==1.4.2
+matplotlib==3.9.2
+tqdm==4.67.0
+python-dateutil
+faiss-cpu
+wandb==0.18.7
+
+# Optional: if you need mixed precision / profiling
+# accelerate>=0.33.0
+# bitsandbytes>=0.43.0
