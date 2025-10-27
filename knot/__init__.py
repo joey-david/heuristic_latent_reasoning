@@ -1,6 +1,7 @@
-"""Minimal kNoT pipeline package."""
+"""knot subpackage providing only lightweight FAISS retrieval utilities.
 
-from .pipeline import build_index, run_pipeline
-from .report import generate_report, generate_reports
+This trimmed __init__ intentionally avoids importing optional modules so that
+downstream code can import `knot.retrieval` without pulling in unused deps.
+"""
 
-__all__ = ["build_index", "run_pipeline", "generate_report", "generate_reports"]
+__all__: list[str] = []

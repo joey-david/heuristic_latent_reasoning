@@ -2,7 +2,7 @@ dataset: data/gsm_test.json
 train_dataset: data/gsm_train.json
 model_checkpoint: data/checkpoints/gsm/gsm-coconut
 model_id: openai-community/gpt2
-run_id: gsm8k-coconut-eval
+run_id: coconut-baseline-1k
 max_examples: 1000
 max_new_tokens: 160
 c_thought: 2
@@ -12,12 +12,4 @@ latent_tokens: null
 dry_run: false
 retrieval:
   enabled: false
-  train_cache: outputs/coconut_train_latents.jsonl
-  index_path: outputs/coconut_train.faiss
-  metadata_path: outputs/coconut_train.faiss.meta.json
-  max_cache_examples: 20000
-  k: 5
-  normalize: true
-  temperature: 0.1
-  alpha: 0.5
-  threshold: 0.2
+

@@ -1,4 +1,0 @@
-configs:
-  - path: configs/gsm.yaml
-    enabled: true
-    steps: null
