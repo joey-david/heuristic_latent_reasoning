@@ -1,0 +1,10 @@
+{
+  "avg_tokens": 64.0,
+  "base_accuracy": 0.006,
+  "improved": 1,
+  "knot_accuracy": 0.008,
+  "regressed": 0,
+  "total": 500,
+  "unchanged_correct": 3,
+  "unchanged_wrong": 496
+}

@@ -23,7 +23,7 @@ data:
     cache: outputs/gsm_train_latents.jsonl
     limit: 20000
   eval:
-    path: data/gsm_valid.json
+    path: data/gsm_test.json
     cache: outputs/gsm_valid_latents.jsonl
     limit: null
 index:

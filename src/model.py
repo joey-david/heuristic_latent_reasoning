@@ -10,7 +10,9 @@ ensure_transformers_no_torchvision()
 
 from transformers.models.gpt2 import GPT2LMHeadModel
 
-Outputs = namedtuple("Outputs", ["loss", "inputs_embeds", "logits"])
+Outputs = namedtuple(
+    "Outputs", ["loss", "inputs_embeds", "logits", "final_hidden"]
+)
 MAX_N_LATENT = 8
 
 
@@ -182,6 +184,9 @@ class Coconut(nn.Module):
         )
 
         logits.append(outputs.logits)
+        final_hidden = outputs.hidden_states[-1][
+            :, -1, :
+        ]  # final latent repr before answer tokens
 
         self.gen_forward_cnt += max_n_latents + 1
 
@@ -193,7 +198,12 @@ class Coconut(nn.Module):
             shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
         )
 
-        return Outputs(loss=loss, inputs_embeds=inputs_embeds, logits=logits)
+        return Outputs(
+            loss=loss,
+            inputs_embeds=inputs_embeds,
+            logits=logits,
+            final_hidden=final_hidden,
+        )
 
     def train(self):
         self.base_causallm.train()
