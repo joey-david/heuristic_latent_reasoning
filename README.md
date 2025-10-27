@@ -5,7 +5,7 @@ This repository builds on top of [Coconut](https://arxiv.org/abs/2412.06769) and
 of a single forward pass as a *latent thought*, retrieve nearest neighbours with FAISS, and
 correct answers via non-parametric voting—no extra decoding tokens required.
 
-The tree now contains:
+The tree now contain:
 
 - the original Coconut training/eval harness (for baseline reproduction),
 - a minimal kNoT toolkit for latent extraction, FAISS indexing, voting, and optional gating,
