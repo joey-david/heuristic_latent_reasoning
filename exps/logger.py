@@ -46,12 +46,12 @@ class ExperimentLogger:
         if extra_metrics:
             entry.update(extra_metrics)
 
-        with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        # with self.log_path.open("a", encoding="utf-8") as handle:
+        #     handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-        print(
-            f"[{self.model_name}] problem={problem_id} "
-            f"correct={entry['is_correct']} "
-            f"tokens={entry['num_generated_tokens']} "
-            f"time_ms={entry['inference_time_ms']:.2f}"
-        )
+        # print(
+        #     f"[{self.model_name}] problem={problem_id} "
+        #     f"correct={entry['is_correct']} "
+        #     f"tokens={entry['num_generated_tokens']} "
+        #     f"time_ms={entry['inference_time_ms']:.2f}"
+        # )

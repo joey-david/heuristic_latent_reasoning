@@ -250,8 +250,14 @@ class Coconut(nn.Module):
         if apply_nudge:
             inputs_embeds[:, -1, :] += latent_nudge.to(inputs_embeds.device)
 
-        # get the first token using the current hidden state
-        next_token = torch.argmax(outputs.logits[0, -1]).item()
+        # get the first token using the (possibly nudged) hidden state
+        if apply_nudge:
+            with torch.no_grad():
+                first_pass = self.base_causallm(inputs_embeds=inputs_embeds)
+            first_logits = first_pass.logits
+        else:
+            first_logits = outputs.logits
+        next_token = torch.argmax(first_logits[0, -1]).item()
         tokens.append(next_token)
         new_token_embed = self.embedding(
             torch.tensor(next_token, device=input_ids.device)
