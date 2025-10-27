@@ -1,6 +1,6 @@
 # kNoT: Latent Retrieval for Coconut
 
-This repository builds on top of [Coconut](https://arxiv.org/abs/2412.06769) and adds a lean
+This reository builds on top of [Coconut](https://arxiv.org/abs/2412.06769) and adds a lean
 **k-Nearest Neighbors of Thought (kNoT)** pipeline. The goal is to reuse the final hidden state
 of a single forward pass as a *latent thought*, retrieve nearest neighbours with FAISS, and
 correct answers via non-parametric voting—no extra decoding tokens required.
