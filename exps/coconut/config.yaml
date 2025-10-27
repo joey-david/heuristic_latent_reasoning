@@ -15,6 +15,7 @@ retrieval:
   train_cache: outputs/coconut_train_latents.jsonl
   index_path: outputs/coconut_train.faiss
   metadata_path: outputs/coconut_train.faiss.meta.json
+  max_cache_examples: 20000
   k: 5
   normalize: true
   temperature: 0.1
