@@ -1,15 +1,15 @@
 # Heuristic Latent Reasoning (FAISS-Augmented Coconut)
 
-This project layers a FAISS-backed heuristic memory on top of the base Coconut latent-reasoning model. Instead of sampling latent tokens blindly, we can retrieve vetted reasoning traces, transform them into guidance vectors, and gently steer the model toward latent indices that have historically produced correct answers. Everything here focuses on those augmentations—the Coconut training loop, tokenizer tweaks, and data preparation remain unchanged.
+Attempt at layering a FAISS-backed heuristic memory on top of the base Coconut latent-reasoning model. Instead of sampling latent tokens blindly, the idea is to retrieve vetted reasoning traces, transform them into guidance vectors, and gently steer the model toward latent indices that have historically produced correct answers. This repo is based off of a fork from the official Coconut repository from Meta FAIR.
 
-## What Was Added
+## Additions
 - **Latent memory built on FAISS (`heuristic.py`)** stores projected `k0` and `kn` activations plus metadata. Key/value projections are regenerated on the fly so the FAISS index always mirrors the latest nudging weights.
 - **KeyProjector + NudgingNet** compress latents before indexing and learn how to convert a retrieved trace into an actionable nudge. The nudger is trained online to keep the returned vector’s norm inside a configurable trust region.
 - **HeuristicMemory orchestration** covers index builds, duplicate suppression, novelty gating, and write-back to disk (`faiss_index_path`, `meta*.pkl`, `nudge*.pt`). The module also exposes `get_nudge` so inference can query FAISS and gate nudges by similarity, confidence, and apply-rate targets.
 - **Experiment harness (`exps/heuristic/run_experiment.py`)** handles Coconut checkpoint loading, latent extraction, heuristic retrieval, and answer evaluation while streaming metrics to `exps/logger` + live plots.
 - **Sweep + plotting utilities** (`exps/heuristic/run_sweeps.py`, `exps/generate_plots.py`, `plots/*`) let you monitor FAISS growth, retrieval success, and nudge norms to verify the heuristic system is guiding latent indices instead of destabilizing them.
 
-## Workflow
+## Use it and improve
 1. **Start from a Coconut checkpoint.** Point `model_checkpoint` in `exps/heuristic/config.yaml` to an existing Coconut run (e.g., `data/checkpoints/gsm/gsm-coconut`).
 2. **Configure heuristic memory** via `args/gsm_heuristic.yaml`. Set file paths for the FAISS index, metadata, and nudge weights plus dimensionality and gating hyperparameters.
 3. **Run the heuristic loop** to both build the memory and exercise it online:
@@ -34,4 +34,4 @@ This project layers a FAISS-backed heuristic memory on top of the base Coconut l
 - `plots/` – reference figures showing FAISS index growth, retrieval precision, and guidance behavior.
 - `data/checkpoints/gsm/...` – expected location for Coconut checkpoints plus FAISS/nudge artifacts.
 
-These additions let you treat Coconut’s latent states as entities you can index, retrieve, and reshape. The ultimate goal is to guide future latent indices toward regions where Coconut already knows how to solve the task, giving you a controllable bridge between stored reasoning traces and fresh problems.
+Currently, the nudging neural net only focuses on simple questions, as it detects a high success rate when nudging them. I'm currently trying to use RL and implement a penalty for focusing only on those easy questions. The ultimate goal is to guide future latent indices toward regions where Coconut already knows how to solve the task, giving you a controllable bridge between stored reasoning traces.
